@@ -56,3 +56,38 @@
   loopback: соседи по сети не подключатся, брандмауэр Windows не спрашивает.
 - Добавки Windows-версии: при занятом порте — понятное сообщение (не молчаливый сбой); порт можно сменить в
   настройках (на Android — константы; на ПК конфликтов больше: другие клиенты, резервирования Hyper-V/WSL/Docker).
+
+## 2026-10-29 — как переносим Kotlin-код (принципы порта)
+
+### Имена — как в Kotlin, даже вопреки стилю C#
+- Портированный код сохраняет Kotlin-имена **дословно**, включая camelCase у членов (`ServerProfile.address`,
+  `VlessParser.parse`, `p with { pingMs = … }` вместо `copy(pingMs = …)`), чтобы diff Kotlin↔C# читался построчно
+  и фикс из Android переносился механически. Kotlin `object` → `static class`, верхнеуровневые функции файла
+  `X.kt` → `static class XKt` + `using static` (как JVM-имя). Новый Windows-специфичный код — обычный C#-стиль.
+- **Отвергнуто:** «идиоматичный» C# (PascalCase, LINQ-переписывание) — каждый будущий перенос фикса превращался бы в
+  ручной перевод с риском потерять нюанс.
+
+### Слой совместимости `XGates.Core.Compat` — поведение Android, а не .NET
+- Kotlin-парсеры подписок опираются на семантику платформы. Её нельзя заменять «похожими» API .NET — другой набор
+  серверов и другие serverKey. Перенесены точные порты:
+  - `JavaUri` — `java.net.URI` из **Android libcore** (не JDK): на Android «_» в имени хоста разрешён, `%` между
+    `[ ]` во фрагменте не декодируется, иначе устроен разбор IPv4. `System.Uri` — мягче и нормализует.
+  - `AndroidBase64` — `android.util.Base64`: пропускает ЛЮБОЙ символ вне алфавита; `Convert.FromBase64String` бросает.
+  - `org.json` (`JSONObject/JSONArray/JSONTokener`) — мягкий разбор Android (комментарии, одинарные кавычки,
+    hex/octal, хвост после значения) и приведения `optString/optInt`; `System.Text.Json` строже.
+  - `JavaUrlDecoder`, `JavaNumbers` (Double.toString/valueOf), `KotlinText` (isBlank/trim/toIntOrNull/trimIndent —
+    у Kotlin своё определение пробела: U+001C..U+001F да, U+0085 нет).
+- Исходники AOSP для сверки лежат в `tools/golden/aosp/` (Apache 2.0).
+
+### Проверка паритета — golden-эталон с настоящего Kotlin-кода
+- `tools/golden/run-golden.sh` гоняет корпус (`tools/golden/corpus`, генератор `make-corpus.py`) через НАСТОЯЩИЕ
+  Kotlin-классы во временной копии Android-проекта; `android.util.Base64`/`org.json` в JVM-тестах — заглушки, поэтому
+  подкладываются реальные AOSP-классы отдельным jar. C#-тест `GoldenParityTests` требует совпадения профилей и
+  конфигов xray **байт в байт**. Разово сверено на 905 реальных ссылках 5 дефолтных подписок — 0 расхождений
+  (реальный корпус в репо не кладётся: в нём рабочие пароли публичных серверов).
+- Ограничение: эталон снимается на JDK 21, а не на телефоне → Android-правки URI проверяются отдельными тестами
+  (`AndroidCompatTests`) по исходникам AOSP.
+- **Найдено в Android (не чинили в одностороннем порядке, см. UPSTREAM-SYNC):** (1) `JsonConfigParser` отдаёт
+  `network="splithttp"`, а `XrayConfigBuilder` его не принимает («unsupported transport») — такие JSON-серверы не
+  собираются; (2) ~1.5% реальных vmess-ссылок вида `vmess://<base64>=?…` отбрасываются (хвост после паддинга ломает
+  android Base64). Решать вместе с Android-версией.
