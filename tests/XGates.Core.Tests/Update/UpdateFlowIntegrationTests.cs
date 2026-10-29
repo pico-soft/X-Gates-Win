@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -62,6 +64,7 @@ public sealed class UpdateFlowIntegrationTests : IDisposable
         NotificationHelper.Sink = savedSink;
         UpdateFlowController.launchInstaller = savedLaunch;
         UpdateFlowController.exitApp = () => { };
+        UpdateAutoCheck.proxyWaitMs = UpdateChecker.AUTO_CHECK_PROXY_WAIT_MS;
         UpdateStore.resetForTest();
         key.Dispose();
         net.Dispose();
@@ -293,6 +296,50 @@ public sealed class UpdateFlowIntegrationTests : IDisposable
         UpdateStore.apply(ctx, UpdateChecker.check(ctx), nowMs: 2_000);
         Assert.Equal((8, "0.8 beta"), UpdateStore.bannerVersion(notifyOn: true));
         Assert.True(UpdateStore.shouldNotify(true));
+    }
+
+    [Fact]
+    public void Periodic_check_only_while_proxy_runs_and_once_a_day()
+    {
+        Publish("v0.7", code: 7);
+        var sink = new RecordingSink(); NotificationHelper.Sink = sink;
+
+        Assert.False(UpdateAutoCheck.periodicTick(ctx, proxyRunning: false));
+        Assert.Equal(0, UpdateStore.record.value.checkedAtMs);
+
+        Assert.True(UpdateAutoCheck.periodicTick(ctx, proxyRunning: true));
+        Assert.Equal((7, "0.7 beta"), UpdateStore.bannerVersion(notifyOn: true));
+        Assert.Single(sink.shown, s => s.kind == NotificationHelper.Kind.UPDATE);
+
+        Assert.False(UpdateAutoCheck.periodicTick(ctx, proxyRunning: true));   // сутки не прошли
+    }
+
+    [Fact]
+    public void Cold_start_check_waits_for_own_proxy_and_stays_silent_without_it()
+    {
+        Publish("v0.7", code: 7);
+        UpdateAutoCheck.proxyWaitMs = 0;
+
+        // Своего SOCKS нет → молча выходим, ничего не записав (ручная кнопка объяснит).
+        Assert.True(UpdateAutoCheck.coldStart(ctx)!.Join(10_000));
+        Assert.Equal(0, UpdateStore.record.value.checkedAtMs);
+
+        // «Свой SOCKS» слушает (заглушка рвёт соединения — каскад переходит на прямую ступень) → проверка записана.
+        using var fake = new TcpListener(IPAddress.Loopback, 0);
+        fake.Start();
+        var port = ((IPEndPoint)fake.LocalEndpoint).Port;
+        var stop = false;
+        var acceptor = new Thread(() => { while (!stop) { try { fake.AcceptTcpClient().Dispose(); } catch (Exception) { return; } } }) { IsBackground = true };
+        acceptor.Start();
+        CascadeFetch.ownSocksPort = () => port;
+        try
+        {
+            Assert.True(UpdateAutoCheck.coldStart(ctx)!.Join(30_000));
+            Assert.NotEqual(0, UpdateStore.record.value.checkedAtMs);
+            Assert.Equal((7, "0.7 beta"), UpdateStore.bannerVersion(notifyOn: true));
+            Assert.Null(UpdateAutoCheck.coldStart(ctx));   // сутки не прошли — потока нет
+        }
+        finally { stop = true; fake.Stop(); }
     }
 
     private sealed class RecordingSink : NotificationHelper.INotificationSink

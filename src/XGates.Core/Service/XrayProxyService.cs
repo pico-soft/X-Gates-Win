@@ -6,6 +6,7 @@ using XGates.Core.Platform;
 using XGates.Core.Settings;
 using XGates.Core.Subscription;
 using XGates.Core.Traffic;
+using XGates.Core.Update;
 using XGates.Core.Xray;
 
 namespace XGates.Core.Service;
@@ -81,6 +82,17 @@ public static class XrayProxyService
         };
         // Пр.139: сразу оценить ТЕКУЩУЮ сеть.
         EconomyNet.applyNow(app!);
+        // Промпт 93.I: пока прокси активен — раз в сутки проверять новую версию ЧЕРЕЗ уже работающий туннель
+        // (несколько КБ). Раз в час смотрим «пора ли»; dueForAutoCheck троттлит до суток. Тихо при неудаче.
+        KThread.start(() =>
+        {
+            while (true)
+            {
+                Thread.Sleep(60 * 60 * 1000);
+                var a = app;
+                if (a != null) UpdateAutoCheck.periodicTick(a, ProxyState.state.value.running);
+            }
+        }, "update-auto");
     }
 
     // ---- события платформы (приложение пробрасывает их сюда) ----
