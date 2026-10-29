@@ -20,6 +20,9 @@ public sealed class LocalTestNet : IDisposable
 
     public int HttpPort { get; }
 
+    /// <summary>Тело «подписки» по /sub (одна vless-ссылка — чтобы hasSupportedLinks принял ответ).</summary>
+    public string SubBody { get; set; } = "vless://11111111-2222-3333-4444-555555555555@example.com:443?type=ws#sub\n";
+
     public static string XrayPath
     {
         get
@@ -111,7 +114,24 @@ public sealed class LocalTestNet : IDisposable
                         string head = all.Substring(0, end);
                         all = all.Substring(end + 4);
                         string target = head.Split(' ')[1];
-                        if (target.StartsWith("/bytes"))
+                        if (target.StartsWith("/status/"))
+                        {
+                            int code = int.Parse(target.Substring(8));
+                            var extra = code == 429 ? "Retry-After: 42\r\n" : "";
+                            await s.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 {code} X\r\n{extra}Content-Length: 4\r\n\r\nnope"), cts.Token);
+                        }
+                        else if (target.StartsWith("/redirect?to="))
+                        {
+                            var to = Uri.UnescapeDataString(target.Substring("/redirect?to=".Length));
+                            await s.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 302 Found\r\nLocation: {to}\r\nContent-Length: 0\r\n\r\n"), cts.Token);
+                        }
+                        else if (target.StartsWith("/sub"))
+                        {
+                            var bodyBytes = Encoding.UTF8.GetBytes(SubBody);
+                            await s.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {bodyBytes.Length}\r\n\r\n"), cts.Token);
+                            await s.WriteAsync(bodyBytes, cts.Token);
+                        }
+                        else if (target.StartsWith("/bytes"))
                         {
                             int len = int.Parse(target.Split("n=")[1]);
                             await s.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {len}\r\nContent-Type: application/octet-stream\r\n\r\n"), cts.Token);
