@@ -1,0 +1,18 @@
+## сгенерировано make-corpus.py — не править руками
+ss://YWVzLTI1Ni1nY206cGFzczEyMw@example.com:8388#ss-sip002-b64
+ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpwQHNzOndpdGg6Y29sb25z@1.2.3.4:443#ss-sip002-padded
+ss://aes-128-gcm:plainpass@example.com:8388#ss-plain-userinfo
+ss://2022-blake3-aes-256-gcm:a2V5MQ%3D%3D%3Aa2V5Mg%3D%3D@example.com:443#ss-2022-encoded
+ss://YWVzLTI1Ni1nY206cGFzcw==@example.com:8388/?plugin=obfs-local%3Bobfs%3Dhttp#ss-plugin
+ss://YWVzLTI1Ni1nY206cGFzcw==@[2001:db8::2]:8388#ss-ipv6
+ss://YWVzLTI1Ni1nY206cGFzcw==@example.com#ss-no-port
+ss://QUVTLTI1Ni1HQ006bGVnYWN5UGFzc0BsZWdhY3kuZXhhbXBsZS5jb206ODM4OA==#ss-legacy%20%D0%BB%D0%B5%D0%B3
+ss://YWVzLTI1Ni1nY206cHdAaG9zdC5leGFtcGxlLmNvbTo4Mzg4Lw==#ss-legacy-slash
+ss://YWVzLTI1Ni1nY206cHc=@legacyat.example.com:8388#ss-legacy-left-b64
+ss://YWVzLTI1Ni1nY206QGV4YW1wbGUuY29tOjgzODg=#ss-empty-pass
+ss://OnB3QGV4YW1wbGUuY29tOjgzODg=#ss-empty-method
+ss://bm9jb2xvbg==@example.com:8388#ss-no-colon
+ss://YWVzLTI1Ni1nY206cHdAZXhhbXBsZS5jb206bm90YXBvcnQ=#ss-legacy-bad-port
+ss://YWVzLTI1Ni1nY206cHcKQGV4YW1wbGUuY29tOjgzODg=#ss-legacy-newline
+ss://garbage!!!#ss-garbage
+ss://YWVzLTI1Ni1nY206cHdAZXhhbXBsZS5jb206ODM4OA==#bad%zzescape

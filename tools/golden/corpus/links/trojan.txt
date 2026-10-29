@@ -1,0 +1,8 @@
+## сгенерировано make-corpus.py — не править руками
+trojan://p%40ss%3Aword@example.com:443?sni=example.com#trojan-encoded-pass
+trojan://secret@example.com:443?security=none&type=ws&path=%2Ft#trojan-none-ws
+trojan://secret@example.com#trojan-no-port
+trojan://secret@example.com:8443?type=grpc&serviceName=g&security=tls&fp=chrome&alpn=h2#trojan-grpc
+trojan://@example.com:443#trojan-no-pass
+trojan://secret@example.com:443?security=reality&pbk=K&sid=1#trojan-reality
+Trojan://secret@example.com:443#mixed-case

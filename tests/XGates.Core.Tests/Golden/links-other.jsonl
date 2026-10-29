@@ -1,0 +1,10 @@
+{"in":"hysteria2://pass@example.com:443?sni=a#hy2","kind":"Unsupported","scheme":"hysteria2","raw":"hysteria2://pass@example.com:443?sni=a#hy2"}
+{"in":"hy2://pass@example.com:443#hy2-short","kind":"Unsupported","scheme":"hy2","raw":"hy2://pass@example.com:443#hy2-short"}
+{"in":"tuic://uuid:pass@example.com:443#tuic","kind":"Unsupported","scheme":"tuic","raw":"tuic://uuid:pass@example.com:443#tuic"}
+{"in":"wireguard://key@example.com:51820#wg","kind":"Unsupported","scheme":"wireguard","raw":"wireguard://key@example.com:51820#wg"}
+{"in":"socks://dXNlcjpwYXNz@example.com:1080#socks","kind":"Unsupported","scheme":"socks","raw":"socks://dXNlcjpwYXNz@example.com:1080#socks"}
+{"in":"HYSTERIA2://x@y:1#upper-hy2","kind":"Unsupported","scheme":"hysteria2","raw":"HYSTERIA2://x@y:1#upper-hy2"}
+{"in":"http://example.com/sub","kind":"Invalid","reason":"unknown scheme","raw":"http://example.com/sub"}
+{"in":"just some text","kind":"Invalid","reason":"unknown scheme","raw":"just some text"}
+{"in":"#comment-like","kind":"Invalid","reason":"unknown scheme","raw":"#comment-like"}
+{"in":"vless:/missing-slash@example.com:443","kind":"Invalid","reason":"unknown scheme","raw":"vless:/missing-slash@example.com:443"}

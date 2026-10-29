@@ -1,0 +1,6 @@
+# profile-title: Test
+# support-url: https://t.me/x
+
+vless://11111111-2222-3333-4444-555555555555@example.com:443?encryption=none&security=tls&type=ws&path=%2Fws&host=cdn.example.com&sni=example.com&fp=chrome#VLESS%20WS
+vless://11111111-2222-3333-4444-555555555555@example.com:443?encryption=none&mode=packet-up&path=%2Fassets%2Fv2&security=reality&pbk=SOMEKEY&sid=ab12&sni=s.example.com&type=xhttp&fp=chrome&spx=%2F#xhttp-reality
+vless://11111111-2222-3333-4444-555555555555@1.2.3.4:8443?security=reality&flow=xtls-rprx-vision&pbk=PUB&sid=00&sni=www.microsoft.com&fp=firefox&type=tcp#%D0%A0%D0%BE%D1%81%D1%81%D0%B8%D1%8F%20%F0%9F%87%B7%F0%9F%87%BA

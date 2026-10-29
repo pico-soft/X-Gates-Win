@@ -1,0 +1,11 @@
+## сгенерировано make-corpus.py — не править руками
+hysteria2://pass@example.com:443?sni=a#hy2
+hy2://pass@example.com:443#hy2-short
+tuic://uuid:pass@example.com:443#tuic
+wireguard://key@example.com:51820#wg
+socks://dXNlcjpwYXNz@example.com:1080#socks
+HYSTERIA2://x@y:1#upper-hy2
+http://example.com/sub
+just some text
+#comment-like
+vless:/missing-slash@example.com:443

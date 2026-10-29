@@ -1,0 +1,42 @@
+## сгенерировано make-corpus.py — не править руками
+vless://11111111-2222-3333-4444-555555555555@example.com:443?encryption=none&security=tls&type=ws&path=%2Fws&host=cdn.example.com&sni=example.com&fp=chrome#VLESS%20WS
+vless://11111111-2222-3333-4444-555555555555@example.com:443?encryption=none&mode=packet-up&path=%2Fassets%2Fv2&security=reality&pbk=SOMEKEY&sid=ab12&sni=s.example.com&type=xhttp&fp=chrome&spx=%2F#xhttp-reality
+vless://11111111-2222-3333-4444-555555555555@1.2.3.4:8443?security=reality&flow=xtls-rprx-vision&pbk=PUB&sid=00&sni=www.microsoft.com&fp=firefox&type=tcp#%D0%A0%D0%BE%D1%81%D1%81%D0%B8%D1%8F%20%F0%9F%87%B7%F0%9F%87%BA
+vless://11111111-2222-3333-4444-555555555555@[2001:db8::1]:443?type=grpc&serviceName=svc&security=tls&alpn=h2%2Chttp%2F1.1#ipv6-grpc
+vless://11111111-2222-3333-4444-555555555555@example.com?type=ws#no-port
+vless://11111111-2222-3333-4444-555555555555@example.com:0?type=ws#port-zero
+VLESS://11111111-2222-3333-4444-555555555555@Example.COM:443?security=tls#upper-scheme
+vless://@example.com:443?security=tls#no-uuid
+vless://11111111-2222-3333-4444-555555555555@example.com:443?security=false&type=raw#sec-false
+vless://11111111-2222-3333-4444-555555555555@example.com:443?security=auto&type=tcp&headerType=http&path=%2Findex&host=a.com#sec-auto-http
+vless://11111111-2222-3333-4444-555555555555@example.com:443?type=kcp&seed=s33d&headerType=wechat-video#kcp
+vless://11111111-2222-3333-4444-555555555555@example.com:443?type=mkcp&headerType=srtp#mkcp
+vless://11111111-2222-3333-4444-555555555555@example.com:443?type=httpupgrade&path=%2Fup&host=h.com&security=tls&sni=s.com#httpupgrade
+vless://11111111-2222-3333-4444-555555555555@example.com:443?type=splithttp&path=%2Fsp#splithttp
+vless://11111111-2222-3333-4444-555555555555@example.com:443?type=quic&security=tls#quic-unsupported
+vless://11111111-2222-3333-4444-555555555555@example.com:443?type=h2&security=tls#h2-unknown
+vless://11111111-2222-3333-4444-555555555555@example.com:443?allowInsecure=1&security=tls#insecure
+vless://11111111-2222-3333-4444-555555555555@example.com:443?insecure=1&security=tls#insecure2
+vless://11111111-2222-3333-4444-555555555555@example.com:443?a=1&a=2&=x&novalue&empty=&path=%zz#dup-keys-bad-escape
+vless://11111111-2222-3333-4444-555555555555@example.com:443?path=%2F%3Fed%3D2048&host=x.com&type=ws#early-data
+vless://11111111-2222-3333-4444-555555555555@example.com:443?type=ws#remark with space
+vless://11111111-2222-3333-4444-555555555555@example.com:443?type=ws#plus+sign%2Bplus
+vless://11111111-2222-3333-4444-555555555555@example.com:443?type=ws#%E2%9A%A1%EF%B8%8F%20Fast%20%7C%20DE
+vless://11111111-2222-3333-4444-555555555555@-bad-.example.com:443#bad-host
+vless://11111111-2222-3333-4444-555555555555@example.com:abc#bad-port
+vless://11111111-2222-3333-4444-555555555555@example.com:99999?type=ws#huge-port
+vless://11111111-2222-3333-4444-555555555555@127.0.0.1:1080#loopback
+vless://11111111-2222-3333-4444-555555555555@256.1.1.1:443#bad-ipv4-as-host
+vless://11111111-2222-3333-4444-555555555555@123.example.com:443#digit-label
+vless://11111111-2222-3333-4444-555555555555@example.123:443#digit-tld
+vless://user%40mail@example.com:443#encoded-userinfo
+  vless://11111111-2222-3333-4444-555555555555@example.com:443?type=ws#leading-spaces  
+vless://11111111-2222-3333-4444-555555555555@example.com:443/?type=ws&security=tls#slash-before-query
+vless://11111111-2222-3333-4444-555555555555@example.com:443?type=ws&security=tls&sni=%D0%BF%D1%80%D0%B8%D0%BC%D0%B5%D1%80.%D1%80%D1%84#idn-sni
+vless://11111111-2222-3333-4444-555555555555@xn--e1afmkfd.xn--p1ai:443?security=tls#punycode
+vless://11111111-2222-3333-4444-555555555555@example.com:443?security=tls&fp=chrome&alpn=h2#ок кириллица
+vless://11111111-2222-3333-4444-555555555555@example.com:443?type=ws#frag#second-hash
+vless://11111111-2222-3333-4444-555555555555@example.com:443?type=ws&path=/plain/path&host=a.com#unencoded-path
+vless://11111111-2222-3333-4444-555555555555@[::ffff:1.2.3.4]:443#ipv4-mapped
+vless://11111111-2222-3333-4444-555555555555@[fe80::1%25eth0]:443#scope-id
+vless://11111111-2222-3333-4444-555555555555@[1:2:3]:443#bad-ipv6

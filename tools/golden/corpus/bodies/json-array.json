@@ -1,0 +1,335 @@
+[
+  {
+    "remarks": "Автовыбор",
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "0.0.0.0",
+              "port": 1,
+              "users": [
+                {
+                  "id": "11111111-2222-3333-4444-555555555555"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "remarks": "DE-1",
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "de.example.com",
+              "port": 443,
+              "users": [
+                {
+                  "id": "11111111-2222-3333-4444-555555555555",
+                  "encryption": "none",
+                  "flow": "xtls-rprx-vision"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "tcp",
+          "security": "reality",
+          "realitySettings": {
+            "serverName": "www.google.com",
+            "fingerprint": "chrome",
+            "publicKey": "PK",
+            "shortId": "ab",
+            "spiderX": "/"
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom"
+      }
+    ]
+  },
+  {
+    "remarks": "NL-ws",
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "nl.example.com",
+              "port": 443,
+              "users": [
+                {
+                  "id": "11111111-2222-3333-4444-555555555555",
+                  "encryption": ""
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "ws",
+          "security": "tls",
+          "tlsSettings": {
+            "serverName": "nl.example.com",
+            "alpn": [
+              "h2",
+              "http/1.1"
+            ],
+            "allowInsecure": true
+          },
+          "wsSettings": {
+            "path": "/ws",
+            "headers": {
+              "Host": "cdn.nl"
+            }
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom"
+      }
+    ]
+  },
+  {
+    "remarks": "FI-vmess",
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vmess",
+        "settings": {
+          "vnext": [
+            {
+              "address": "fi.example.com",
+              "port": 8443,
+              "users": [
+                {
+                  "id": "11111111-2222-3333-4444-555555555555",
+                  "security": ""
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "grpc",
+          "grpcSettings": {
+            "serviceName": "gs"
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom"
+      }
+    ]
+  },
+  {
+    "remarks": "",
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "trojan",
+        "settings": {
+          "servers": [
+            {
+              "address": "tr.example.com",
+              "port": 443,
+              "password": "pw"
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "httpupgrade",
+          "security": "tls",
+          "httpupgradeSettings": {
+            "path": "/u",
+            "host": "h"
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom"
+      }
+    ]
+  },
+  {
+    "remarks": "SS",
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "shadowsocks",
+        "settings": {
+          "servers": [
+            {
+              "address": "ss.example.com",
+              "port": 8388,
+              "password": "pw",
+              "method": "aes-256-gcm"
+            }
+          ]
+        },
+        "streamSettings": null
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom"
+      }
+    ]
+  },
+  {
+    "remarks": "XH",
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "[2001:db8::5]",
+              "port": 443,
+              "users": [
+                {
+                  "id": "11111111-2222-3333-4444-555555555555"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "splithttp",
+          "splithttpSettings": {
+            "path": "/x",
+            "host": "xh",
+            "mode": "auto"
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom"
+      }
+    ]
+  },
+  {
+    "remarks": "KCP",
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "k.example.com",
+              "port": "443",
+              "users": [
+                {
+                  "id": "11111111-2222-3333-4444-555555555555"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "kcp",
+          "kcpSettings": {
+            "header": {
+              "type": "dtls"
+            },
+            "seed": "sd"
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom"
+      }
+    ]
+  },
+  {
+    "remarks": "TCP-HTTP",
+    "outbounds": [
+      {
+        "tag": "proxy",
+        "protocol": "vless",
+        "settings": {
+          "vnext": [
+            {
+              "address": "t.example.com",
+              "port": 80,
+              "users": [
+                {
+                  "id": "11111111-2222-3333-4444-555555555555"
+                }
+              ]
+            }
+          ]
+        },
+        "streamSettings": {
+          "network": "raw",
+          "rawSettings": {
+            "header": {
+              "type": "http",
+              "request": {
+                "path": [
+                  "/a",
+                  "/b"
+                ],
+                "headers": {
+                  "Host": [
+                    "th.com"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "tag": "direct",
+        "protocol": "freedom"
+      }
+    ]
+  },
+  {
+    "remarks": "no-proxy-tag",
+    "outbounds": [
+      {
+        "tag": "direct",
+        "protocol": "freedom"
+      },
+      {
+        "tag": "x",
+        "protocol": "trojan",
+        "settings": {
+          "servers": [
+            {
+              "address": "np.example.com",
+              "port": 443,
+              "password": "pw"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "remarks": "no-outbounds"
+  },
+  "not-an-object"
+]
