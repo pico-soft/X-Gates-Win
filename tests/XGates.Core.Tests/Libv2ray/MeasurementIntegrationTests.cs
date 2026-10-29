@@ -121,8 +121,9 @@ public sealed class MeasurementIntegrationTests : IDisposable
         try
         {
             var m = ServerSpeedTester.uploadMbps($"http://127.0.0.1:{net.HttpPort}/up", socks, 100, 400, 2 * 1024 * 1024, "тест↑", true);
-            // На петле отдача «бесконечно» быстрая → честный исход: либо валидно, либо отсечено как буфер-фейк (>500).
-            Assert.True(m.ok || m.reason.Contains("нереально"), m.reason);
+            // На петле отдача «бесконечно» быстрая → честные исходы: валидно / отсечено как буфер-фейк (>500 Мбит/с) /
+            // «нулевое окно» (2 МБ записались быстрее 1 мс). Главное — байты реально ушли через туннель.
+            Assert.True(m.ok || m.reason.Contains("нереально") || m.reason == "нулевое окно отдачи", m.reason);
             Assert.True(m.bytes >= 64 * 1024, $"bytes={m.bytes}");
         }
         finally { core.stopLoop(); }

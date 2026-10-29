@@ -118,3 +118,17 @@
   через `KThread.start` (ловит и логирует), пулы — через `FixedThreadPool` (семантика `Executors.newFixedThreadPool`:
   shutdown/shutdownNow/awaitTermination; `Long.MAX_VALUE` = «вечно»). Найдено тестом: краш тест-хоста от
   переполнения TimeSpan в фоновом потоке.
+
+## Найдено в Android-коде при порте (НЕ чинили в одностороннем порядке — решать вместе, UPSTREAM-SYNC)
+
+Порт держит паритет, поэтому Windows-версия повторяет эти места; исправлять — в ОБЕИХ версиях сразу.
+1. `JsonConfigParser` отдаёт `network="splithttp"`, а `XrayConfigBuilder` его не принимает («unsupported transport»)
+   → JSON-серверы со splithttp не собираются.
+2. ~1.5% реальных vmess-ссылок вида `vmess://<base64>=?…` отбрасываются (хвост после паддинга ломает Base64).
+3. `NetworkMonitor.rebuildAndRateTop`: `coerceIn(targetTop, needMeasure.size)` при `needMeasure < 10` — пустой
+   диапазон → IllegalArgumentException → «Ошибка фон-рейтинга топа», фон-рейтинг ничего не мерит (малые пулы).
+4. `ServerSpeedTester.fetchViaTempInstance`: исключение `startLoop` не ловится → обрывает ВЕСЬ каскад загрузки
+   подписки, а не только этого кандидата (ступень 6).
+5. `XrayController.start`: проверка `isRunning` и запуск не атомарны с `stop()` в `runCoreStart` — два почти
+   одновременных `XrayProxyService.start` (полный тест: «первый рабочий» → «точный топ») теоретически могут оставить
+   поднятым НЕ последний выбранный сервер, хотя ProxyState покажет последний.

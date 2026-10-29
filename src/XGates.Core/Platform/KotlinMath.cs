@@ -23,9 +23,13 @@ public static class KotlinMath
         return (long)r;
     }
 
-    public static int coerceIn(this int v, int min, int max) => v < min ? min : v > max ? max : v;
-    public static long coerceIn(this long v, long min, long max) => v < min ? min : v > max ? max : v;
-    public static double coerceIn(this double v, double min, double max) => v < min ? min : v > max ? max : v;
+    // Kotlin coerceIn БРОСАЕТ на пустом диапазоне (min > max) — Android-код местами на это натыкается (см. decisions.md).
+    private static ArgumentException emptyRange(object max, object min) =>
+        new($"Cannot coerce value to an empty range: maximum {max} is less than minimum {min}.");
+
+    public static int coerceIn(this int v, int min, int max) => min > max ? throw emptyRange(max, min) : v < min ? min : v > max ? max : v;
+    public static long coerceIn(this long v, long min, long max) => min > max ? throw emptyRange(max, min) : v < min ? min : v > max ? max : v;
+    public static double coerceIn(this double v, double min, double max) => min > max ? throw emptyRange(max, min) : v < min ? min : v > max ? max : v;
     public static int coerceAtLeast(this int v, int min) => v < min ? min : v;
     public static long coerceAtLeast(this long v, long min) => v < min ? min : v;
     public static double coerceAtLeast(this double v, double min) => v < min ? min : v;

@@ -148,11 +148,16 @@ public sealed class LocalTestNet : IDisposable
                         }
                         else if (target.StartsWith("/bytes"))
                         {
-                            int len = int.Parse(target.Split("n=")[1]);
+                            int len = int.Parse(target.Split("n=")[1].Split('&')[0]);
+                            var slow = target.Contains("slow=1");   // медленная отдача: на петле 100 КБ иначе приходят за <1 мс (окно 0)
                             await s.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Length: {len}\r\nContent-Type: application/octet-stream\r\n\r\n"), cts.Token);
                             var chunk = new byte[Math.Min(len, 65536)];
+                            if (slow) chunk = new byte[16 * 1024];
                             for (int sent = 0; sent < len; sent += chunk.Length)
+                            {
                                 await s.WriteAsync(chunk.AsMemory(0, Math.Min(chunk.Length, len - sent)), cts.Token);
+                                if (slow) await Task.Delay(2, cts.Token);
+                            }
                         }
                         else
                         {
