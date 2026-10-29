@@ -1,0 +1,38 @@
+{
+    "words": [
+        "москва",
+        "россия",
+        "санкт-петербург",
+        "беларусь",
+        "минск",
+        "крым",
+        "moscow",
+        "russia",
+        "st. petersburg",
+        "belarus",
+        "minsk",
+        "crimea"
+    ],
+    "servers": [
+        {
+            "serverKey": "k1",
+            "name": "Имя 1",
+            "blockedAt": 1700000000000
+        }
+    ],
+    "renames": [
+        {
+            "serverKey": "k2",
+            "customName": "Моё",
+            "originalName": "Orig",
+            "renamedAt": 5
+        }
+    ],
+    "paused": [
+        {
+            "serverKey": "k3",
+            "name": "P",
+            "pausedAt": 7
+        }
+    ]
+}

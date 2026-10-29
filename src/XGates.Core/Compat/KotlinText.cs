@@ -45,6 +45,14 @@ internal static class KotlinText
         return s.Substring(start, end - start + 1);
     }
 
+    /// <summary>Kotlin <c>trimStart()</c>.</summary>
+    public static string KTrimStart(this string s)
+    {
+        int start = 0;
+        while (start < s.Length && IsKotlinWhitespace(s[start])) start++;
+        return s.Substring(start);
+    }
+
     /// <summary>Kotlin <c>lowercase()</c> (= <c>toLowerCase(Locale.ROOT)</c>).</summary>
     public static string Lowercase(this string s) => s.ToLowerInvariant();
 

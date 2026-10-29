@@ -17,7 +17,7 @@ export PATH="$JAVA_HOME/bin:$PATH"
 for f in settings.gradle.kts build.gradle.kts gradle.properties gradlew gradle; do cp -r "$ROOT/$f" "$WORK/"; done
 mkdir -p "$WORK/app"; cp -r "$ROOT/app/build.gradle.kts" "$ROOT/app/libs" "$ROOT/app/src" "$WORK/app/"
 T="$WORK/app/src/test/java"
-cp "$ROOT/tools/golden/kotlin/GoldenDumpTest.kt" "$T/com/picosoft/xrayproxydroid/"
+cp "$ROOT/tools/golden/kotlin/"*.kt "$T/com/picosoft/xrayproxydroid/"
 # Реальные org.json/Base64 из AOSP — отдельным jar: исходниками в test/ их перекрывает android.jar (он в bootclasspath
 # компиляции), а как зависимость jar идёт в runtime-classpath РАНЬШЕ заглушечного android.jar.
 mkdir -p "$WORK/aosp-classes"
@@ -28,8 +28,8 @@ printf '\ndependencies { testImplementation(files("%s")) }\n' "$WORK/aosp-real.j
 rm -rf "$OUT.tmp"
 ( cd "$WORK" && GOLDEN_CORPUS="$CORPUS" GOLDEN_OUT="$OUT.tmp" ./gradlew -q --no-daemon \
     -Pkotlin.compiler.execution.strategy=in-process \
-    :app:testDebugUnitTest --tests 'com.picosoft.xrayproxydroid.GoldenDumpTest' )
+    :app:testDebugUnitTest --tests 'com.picosoft.xrayproxydroid.Golden*' )
 mkdir -p "$OUT"
-cp "$OUT.tmp"/*.jsonl "$OUT/"; rm -rf "$OUT.tmp"
+cp -r "$OUT.tmp"/. "$OUT/"; rm -rf "$OUT.tmp"
 ( cd "$ROOT" && git -C "$ROOT" rev-parse --short HEAD 2>/dev/null ) > "$OUT/SOURCE-COMMIT" || true
 echo "golden → $OUT ($(ls "$OUT"/*.jsonl | wc -l) файлов)"
