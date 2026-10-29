@@ -1,7 +1,8 @@
 # X-Gates-Win — правила для Claude Code («КК»)
 
 Порт Android-приложения X-Gates на Windows 10. **Сначала прочитай `HANDOFF.md` целиком**, затем
-`UPSTREAM-SYNC.md`. Этот репозиторий — git-форк Android-проекта (Android-код в `app/` — справочник).
+`UPSTREAM-SYNC.md` и **`docs/decisions.md`** (принятые решения: стек C#/.NET 10 + WPF, а не Compose из HANDOFF §5).
+Этот репозиторий — git-форк Android-проекта (Android-код в `app/` — справочник).
 
 ## Общение
 - Владелец — Elyor. Пишет по-русски → отвечать по-русски. Elyor называет Claude Code «КК».
@@ -32,8 +33,10 @@
 - Чужие данные (подписки пользователя, настройки) — не стирать без отдельного явного вопроса.
 
 ## Окружение (Ubuntu-сервер, без sudo)
-- JDK 21: `export JAVA_HOME=~/.local/opt/jdk-21 PATH=~/.local/opt/jdk-21/bin:$PATH`.
+- .NET 10 SDK: `export DOTNET_ROOT=~/.local/opt/dotnet PATH=~/.local/opt/dotnet:$PATH DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1`.
+  WPF собирается здесь (`EnableWindowsTargeting`), MSI (WiX) — только на Windows.
+- JDK 21 (только для Android-справочника `app/`): `export JAVA_HOME=~/.local/opt/jdk-21 PATH=~/.local/opt/jdk-21/bin:$PATH`.
 - `dl.google.com` по IPv6 → 404: загрузки `curl -4`; Gradle уже с `preferIPv4Stack=true`.
-- `gh` авторизован как `pico-soft`. Экрана нет: UI/упаковка MSI — Windows (см. `HANDOFF.md` §10).
+- `gh` (`~/.local/opt/gh/bin`) авторизован как `pico-soft`; `origin` = `pico-soft/X-Gates-Win` (закрытый). Экрана нет: UI/упаковка MSI — Windows (см. `HANDOFF.md` §10).
 - Телефоны (для Android-сверок) — только через `~/.local/bin/phone-adb`; нет связи → попросить Elyor
   запустить «синхронизатор» на Mac.
