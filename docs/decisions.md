@@ -110,3 +110,11 @@
   `third_party/` в git не кладём. **`wintun.dll` из Windows-архива НЕ поставляем** (TUN запрещён рамками продукта).
 - Факты xray v26.7.28, найденные тестами: freedom по умолчанию не пускает на loopback/частные IP (`finalRules`);
   у vless-outbound счётчик uplink всегда 0 (через собственный CLI ядра тоже) — то же ядро на Android → паритет.
+
+## 2026-10-29 — потоки: семантика JVM, а не .NET
+
+- В Java/Kotlin необработанное исключение в `Thread { }` убивает ТОЛЬКО этот поток; в .NET — ВЕСЬ процесс.
+  Android-код (сторожа батчей, финишёры, посев) написан под JVM. Поэтому все фоновые потоки портированного кода —
+  через `KThread.start` (ловит и логирует), пулы — через `FixedThreadPool` (семантика `Executors.newFixedThreadPool`:
+  shutdown/shutdownNow/awaitTermination; `Long.MAX_VALUE` = «вечно»). Найдено тестом: краш тест-хоста от
+  переполнения TimeSpan в фоновом потоке.

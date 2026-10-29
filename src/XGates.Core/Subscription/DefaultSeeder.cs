@@ -36,11 +36,11 @@ public static class DefaultSeeder
             lastAttemptElapsed = now;
             running = true;
         }
-        new Thread(() =>
+        KThread.start(() =>
         {
             try { SubscriptionManager.trySeedDefaultSource(app); }
             catch (Exception) { }
             finally { running = false; }
-        }) { IsBackground = true }.Start();
+        }, "default-seed");
     }
 }

@@ -114,6 +114,21 @@ public sealed class LocalTestNet : IDisposable
                         string head = all.Substring(0, end);
                         all = all.Substring(end + 4);
                         string target = head.Split(' ')[1];
+                        if (target.StartsWith("/up"))
+                        {
+                            // chunked POST: читаем до терминатора «0\r\n\r\n», отвечаем 200
+                            var tailBuf = all;
+                            while (!tailBuf.Contains("\r\n0\r\n\r\n") && !tailBuf.StartsWith("0\r\n\r\n"))
+                            {
+                                int m = await s.ReadAsync(buf, cts.Token);
+                                if (m == 0) return;
+                                tailBuf = tailBuf.Length > 16 ? tailBuf.Substring(tailBuf.Length - 16) : tailBuf;
+                                tailBuf += Encoding.ASCII.GetString(buf, 0, m);
+                            }
+                            all = "";
+                            await s.WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"), cts.Token);
+                            continue;
+                        }
                         if (target.StartsWith("/status/"))
                         {
                             int code = int.Parse(target.Substring(8));
