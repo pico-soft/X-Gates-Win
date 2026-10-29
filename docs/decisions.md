@@ -91,3 +91,22 @@
   `network="splithttp"`, а `XrayConfigBuilder` его не принимает («unsupported transport») — такие JSON-серверы не
   собираются; (2) ~1.5% реальных vmess-ссылок вида `vmess://<base64>=?…` отбрасываются (хвост после паддинга ломает
   android Base64). Решать вместе с Android-версией.
+
+## 2026-10-29 — ядро xray на Windows: процесс вместо libv2ray
+
+- **Шов — тот же API, что у gomobile-библиотеки Android** (`XGates.Core.Libv2ray`: `Libv2ray.newCoreController`,
+  `CoreController.startLoop/stopLoop/isRunning/queryStats`, `Libv2ray.measureOutboundDelay/checkVersionX`), но поверх
+  дочернего процесса `xray.exe`. Почему: Kotlin-код, работающий с ядром (XrayController, ServerSpeedTester,
+  ServerTester), переносится без смены логики. Логика `measureOutboundDelay` взята из исходников AndroidLibXrayLite
+  **Lib v39** (коммит b213898 = версия AAR в Android): 2 GET по keep-alive, минимум, ≤12 с, 200/204.
+- **Конфиг — через stdin** (`xray run -c stdin:`): UUID/пароли серверов не пишутся на диск.
+- **Статистика**: вывод `XrayConfigBuilder` не трогаем (паритет); `CoreController` при наличии `"stats"` дописывает
+  `"api": {listen 127.0.0.1:<эфемерный>, StatsService}`; чтение-со-сбросом — gRPC `GetStats{reset:true}` (свой
+  мини-клиент h2c, без NuGet). Отвергнуто: запуск `xray api statsquery` на каждый опрос (процесс раз в секунду).
+- **Сироты**: Windows Job Object `KILL_ON_JOB_CLOSE` — ОС убивает xray.exe при любой смерти приложения.
+- **Готовность**: строка ядра «core: Xray … started» (печатается после старта inbound-слушателей) или выход процесса
+  → ошибка с хвостом вывода ядра (напр. «address already in use»).
+- **Версия ядра** — v26.7.28, как в Android; `tools/xray/fetch-xray.sh` (sha256 закреплены в скрипте),
+  `third_party/` в git не кладём. **`wintun.dll` из Windows-архива НЕ поставляем** (TUN запрещён рамками продукта).
+- Факты xray v26.7.28, найденные тестами: freedom по умолчанию не пускает на loopback/частные IP (`finalRules`);
+  у vless-outbound счётчик uplink всегда 0 (через собственный CLI ядра тоже) — то же ядро на Android → паритет.

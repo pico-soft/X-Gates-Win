@@ -27,3 +27,4 @@ obj/
 .vs/
 TestResults/
 /publish/
+/third_party/
