@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Платформенно-независимое ядро (аналог Android-пакета com.picosoft.xrayproxydroid без UI/сервисов).
+       Код повторяет Kotlin 1:1 по именам и структуре — см. docs/decisions.md §13.1. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>XGates.Core</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="XGates.Core.Tests" />
+  </ItemGroup>
+
+</Project>

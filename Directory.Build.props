@@ -1,0 +1,14 @@
+<Project>
+  <!-- Общие свойства всех C#-проектов X-Gates Win (Android-модуль app/ — Gradle, сюда не относится). -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <Company>PICO-SOFT</Company>
+    <Product>X-Gates Win</Product>
+    <Version>0.1.0</Version>
+    <!-- Сборка Windows-проектов на Linux-сервере разработки (см. docs/decisions.md §13.1). -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+</Project>

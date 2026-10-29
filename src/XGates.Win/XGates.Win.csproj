@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- WPF-приложение X-Gates Win (аналог MainActivity + service/* Android). -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>XGates.Win</RootNamespace>
+    <AssemblyName>XGatesWin</AssemblyName>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\XGates.Core\XGates.Core.csproj" />
+  </ItemGroup>
+
+</Project>

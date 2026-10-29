@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/XGates.Core/XGates.Core.csproj" />
+    <Project Path="src/XGates.Win/XGates.Win.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/XGates.Core.Tests/XGates.Core.Tests.csproj" />
+  </Folder>
+</Solution>

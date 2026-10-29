@@ -19,3 +19,11 @@ keystore.properties
 # Release APK — артефакты сборки, в репо не нужны (заливаются вложениями релиза)
 release/*.apk
 .kotlin/
+
+# .NET (X-Gates Win)
+bin/
+obj/
+*.user
+.vs/
+TestResults/
+/publish/
