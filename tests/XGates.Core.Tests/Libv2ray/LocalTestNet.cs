@@ -23,6 +23,12 @@ public sealed class LocalTestNet : IDisposable
     /// <summary>Тело «подписки» по /sub (одна vless-ссылка — чтобы hasSupportedLinks принял ответ).</summary>
     public string SubBody { get; set; } = "vless://11111111-2222-3333-4444-555555555555@example.com:443?type=ws#sub\n";
 
+    /// <summary>Отдать файл по ТОЧНОМУ пути (без query) — «поддельный GitHub» для обновлялки.</summary>
+    public System.Collections.Concurrent.ConcurrentDictionary<string, byte[]> Files { get; } = new();
+
+    /// <summary>302 по ТОЧНОМУ пути → Location (как releases/latest/download → releases/download/&lt;тег&gt;).</summary>
+    public System.Collections.Concurrent.ConcurrentDictionary<string, string> Redirects { get; } = new();
+
     public static string XrayPath
     {
         get
@@ -114,6 +120,18 @@ public sealed class LocalTestNet : IDisposable
                         string head = all.Substring(0, end);
                         all = all.Substring(end + 4);
                         string target = head.Split(' ')[1];
+                        var exact = target.Split('?')[0];
+                        if (Files.TryGetValue(exact, out var file))
+                        {
+                            await s.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {file.Length}\r\n\r\n"), cts.Token);
+                            await s.WriteAsync(file, cts.Token);
+                            continue;
+                        }
+                        if (Redirects.TryGetValue(exact, out var loc))
+                        {
+                            await s.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 302 Found\r\nLocation: {loc}\r\nContent-Length: 0\r\n\r\n"), cts.Token);
+                            continue;
+                        }
                         if (target.StartsWith("/up"))
                         {
                             // chunked POST: читаем до терминатора «0\r\n\r\n», отвечаем 200

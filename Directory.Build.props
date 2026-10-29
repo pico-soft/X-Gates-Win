@@ -8,7 +8,14 @@
     <Company>PICO-SOFT</Company>
     <Product>X-Gates Win</Product>
     <Version>0.1.0</Version>
+    <!-- Целое, растёт с КАЖДЫМ релизом: обновлялка сравнивает ТОЛЬКО его (как versionCode Android). -->
+    <VersionCode>1</VersionCode>
+    <VersionNameDisplay>0.1 beta</VersionNameDisplay>
     <!-- Сборка Windows-проектов на Linux-сервере разработки (см. docs/decisions.md §13.1). -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="VersionCode" Value="$(VersionCode)" />
+    <AssemblyMetadata Include="VersionNameDisplay" Value="$(VersionNameDisplay)" />
+  </ItemGroup>
 </Project>
