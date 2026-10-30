@@ -46,6 +46,9 @@ internal sealed class XrayProcess : IDisposable
             RedirectStandardError = true,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
+            // Конфиг идёт через stdin: явно UTF-8 БЕЗ BOM (по умолчанию на Windows — кодовая страница консоли). Сейчас это
+            // страховка: CoreController пересобирает конфиг System.Text.Json, и всё не-ASCII уходит как \uXXXX.
+            StandardInputEncoding = new UTF8Encoding(false),
             WorkingDirectory = Path.GetDirectoryName(xrayPath)!,
         };
         psi.ArgumentList.Add("run");

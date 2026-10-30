@@ -96,6 +96,25 @@ public sealed class CoreControllerIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void Non_ascii_config_reaches_core_intact()
+    {
+        // Сквозная проверка: не-ASCII значение конфига (путь ws кириллицей) доходит до ядра без искажений — клиент и
+        // сервер сходятся на одном пути. (До stdin конфиг уходит пересобранным, не-ASCII — как \uXXXX.)
+        int server = net.StartVlessServer("ws", "/туннель");
+        var p = LocalVless(server, "type=ws&path=%2F%D1%82%D1%83%D0%BD%D0%BD%D0%B5%D0%BB%D1%8C&host=example.com&security=none");
+        Assert.Contains("/туннель", XrayConfigBuilder.buildForSpeedTest(p, 1));
+        int socks = LocalTestNet.FreePort();
+        var core = L.newCoreController(new LocalTestNet.NoopCallback());
+        core.startLoop(XrayConfigBuilder.buildForSpeedTest(p, socks), 0);
+        try
+        {
+            using var c = ViaSocks(socks);
+            Assert.Equal(5000, c.GetByteArrayAsync($"http://127.0.0.1:{net.HttpPort}/bytes?n=5000").Result.Length);
+        }
+        finally { core.stopLoop(); }
+    }
+
+    [Fact]
     public void Busy_port_fails_start_with_core_output()
     {
         int server = net.StartVlessServer();
