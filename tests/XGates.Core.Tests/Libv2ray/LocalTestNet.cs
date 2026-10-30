@@ -63,6 +63,14 @@ public sealed class LocalTestNet : IDisposable
     }
 
     /// <summary>Поднять «удалённый» vless-сервер (tcp или ws) на петле; вернуть его порт.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, CoreController> serverByPort = new();
+
+    /// <summary>«Обрыв»: остановить vless-сервер стенда — порт закрыт, туннель через него мёртв.</summary>
+    public void StopVlessServer(int port)
+    {
+        if (serverByPort.TryRemove(port, out var core)) core.stopLoop();
+    }
+
     public int StartVlessServer(string network = "tcp", string path = "/ws")
     {
         int port = FreePort();
@@ -88,6 +96,7 @@ public sealed class LocalTestNet : IDisposable
         var core = XGates.Core.Libv2ray.Libv2ray.newCoreController(new NoopCallback());
         core.startLoop(cfg.ToJsonString(), 0);
         servers.Add(core);
+        serverByPort[port] = core;
         return port;
     }
 

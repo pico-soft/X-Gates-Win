@@ -94,8 +94,9 @@ public static class NetworkMonitor
     private const int PING_LIVENESS_TIMEOUT_MS = 8_000;
     // GRACE: «связь прервалась» объявляем ТОЛЬКО если живость не подтверждалась дольше этого (не по одному провалу).
     // Глючно-живой сервер (редкий успех в окне) → зелёная держится; реально мёртвый (молчит всё окно) → красная.
-    private const long LIVENESS_GRACE_MS = 90_000L;
-    private const long GRACE_RECHECK_MS = 25_000L;        // в grace перепроверяем чаще обычного цикла
+    // Не const: тест обрыва туннеля укорачивает grace, чтобы проверка восстановления шла секунды, а не минуты.
+    internal static long LIVENESS_GRACE_MS = 90_000L;
+    internal static long GRACE_RECHECK_MS = 25_000L;      // в grace перепроверяем чаще обычного цикла
     private const long IP_REFRESH_MS = 150_000L;          // внешний IP тянем реже — ТОЛЬКО для показа на плашке
 
     // ── АДАПТИВНЫЙ ЗАМЕР ЖИВОСТИ (снижение трафика/батареи; ТЗ Elyor поверх Пр.150) ──
