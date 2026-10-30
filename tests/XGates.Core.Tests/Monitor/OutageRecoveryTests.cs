@@ -149,6 +149,30 @@ public sealed class OutageRecoveryTests : IDisposable
         finally { NotificationHelper.Sink = savedSink; MonitorPrompt.clear(); MonitorPrompt.resetDeclined(); }
     }
 
+    [Fact]
+    public void No_internet_is_reported_honestly_and_recovers_without_switching()
+    {
+        int a = net.StartVlessServer();
+        SubscriptionManager.init(ctx);
+        SubscriptionManager.addLocalFromBody(ctx, $"vless://{LocalTestNet.Uuid}@127.0.0.1:{a}?type=tcp&security=none#A", "local");
+        var srvA = SubscriptionManager.allServers(ctx).Single();
+        var keyA = SubscriptionManager.serverKey(srvA);
+        var internet = true;
+        NetworkMonitor.directAliveOverrideForTest = () => internet;
+        XrayProxyService.start(ctx, XrayConfigBuilder.build(srvA), "A", keyA);
+        Assert.True(WaitUntil(() => TunnelHealth.isConfirmedFor(keyA, JavaSystem.currentTimeMillis(), 60_000), 30_000, wake: true), $"{TunnelHealth.snapshot()}");
+
+        internet = false;   // пропал прямой канал: туннель чинить бессмысленно — сказать прямо, ядро не трогать
+        Assert.True(WaitUntil(() => TunnelHealth.snapshot().phase == TunnelHealth.Phase.NO_INTERNET, 60_000, wake: true), $"{TunnelHealth.snapshot()}");
+        Assert.Equal(keyA, ProxyState.state.value.serverKey);
+        Assert.True(ProxyState.state.value.running);
+
+        internet = true;    // вернулся → связь через тот же сервер подтверждена фактом, без переключения
+        Assert.True(WaitUntil(() => TunnelHealth.snapshot().phase == TunnelHealth.Phase.OK && TunnelHealth.isConfirmedFor(keyA, JavaSystem.currentTimeMillis(), 60_000), 90_000, wake: true),
+            $"{TunnelHealth.snapshot()}");
+        Assert.Equal(keyA, ProxyState.state.value.serverKey);
+    }
+
     private sealed class Sink(List<NotificationHelper.Kind> shown) : NotificationHelper.INotificationSink
     {
         public void show(NotificationHelper.Kind kind, string title, string text) { lock (shown) shown.Add(kind); }
