@@ -260,6 +260,8 @@
 
                     <TextBlock Style="{StaticResource Section}" Text="Автомониторинг" />
                     <TextBlock x:Name="HeartbeatLine" Foreground="{StaticResource Accent}" FontSize="12" TextWrapping="Wrap" />
+                    <TextBlock FontWeight="Bold" Margin="0,10,0,4" Text="Периодический перемер и проверки" />
+                    <StackPanel x:Name="OptimizePanel" />
                     <DockPanel Margin="0,8,0,4">
                         <Button DockPanel.Dock="Right" Content="Очистить" Click="OnClearJournal" Padding="8,1" Margin="0" />
                         <TextBlock x:Name="JournalTitle" FontWeight="Bold" VerticalAlignment="Center" />

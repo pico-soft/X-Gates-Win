@@ -388,6 +388,7 @@ public partial class MainWindow : Window
             ProtocolsPanel.Children.Add(cb);
         }
         buildParams();
+        buildOptimize();
         renderSettingsLive();
         renderBlocklist();
         renderStats();
@@ -405,12 +406,20 @@ public partial class MainWindow : Window
                 group = row.group;
                 ParamsPanel.Children.Add(new TextBlock { Text = group, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 10, 0, 4) });
             }
+            addRows(ParamsPanel, [row]);
+        }
+    }
+
+    /// <summary>Строки настроек: ввод сохраняется сразу, если значение годится (как onValueChange в Android); иначе рамка красная.</summary>
+    private void addRows(Panel panel, IEnumerable<SettingRow> rows)
+    {
+        foreach (var row in rows)
+        {
             var s = SettingsStore.current();
             var hint = new TextBlock { Text = $"деф. {row.defaultText}", Foreground = (Brush)FindResource("Gray"), FontSize = 11, Visibility = V(row.changed(s)) };
             var left = new StackPanel();
             left.Children.Add(new TextBlock { Text = row.title, TextWrapping = TextWrapping.Wrap });
             left.Children.Add(hint);
-            var line = new DockPanel { Margin = new Thickness(0, 2, 0, 2) };
             FrameworkElement control;
             if (row.kind == SettingKind.BOOL)
             {
@@ -439,14 +448,63 @@ public partial class MainWindow : Window
             {
                 var col = new StackPanel { Margin = new Thickness(0, 2, 0, 4) };
                 col.Children.Add(left); col.Children.Add(control);
-                ParamsPanel.Children.Add(col);
+                panel.Children.Add(col);
                 continue;
             }
+            var line = new DockPanel { Margin = new Thickness(0, 2, 0, 2) };
             DockPanel.SetDock(control, Dock.Right);
             line.Children.Add(control);
             line.Children.Add(left);
-            ParamsPanel.Children.Add(line);
+            panel.Children.Add(line);
         }
+    }
+
+    /// <summary>Блок перемера: ползунки с делениями (как TickSlider), строки активного набора, оценки расхода.</summary>
+    private void buildOptimize()
+    {
+        OptimizePanel.Children.Clear();
+        var s = SettingsStore.current();
+        var gray = (Brush)FindResource("Gray");
+        TextBlock small(string t) => new() { Text = t, Foreground = gray, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 6) };
+        var wasOn = s.activeOptimizeSec > 0;
+        var topCost = small(OptimizeBlock.topCostLine(s));
+        var checkCost = small(OptimizeBlock.checkCostLine(s));
+        var total = new TextBlock { Text = OptimizeBlock.totalLine(s), TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 4, 0, 0) };
+        OptimizePanel.Children.Add(new TextBlock { Text = OptimizeBlock.modeLine(s), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 6) });
+        void slider(string title, IReadOnlyList<string> labels, int index, Func<AppSettings, int, AppSettings> pick)
+        {
+            var head = new TextBlock { Text = $"{title}: {labels[index]}" };
+            var sl = new Slider { Minimum = 0, Maximum = labels.Count - 1, Value = index, TickFrequency = 1, IsSnapToTickEnabled = true, TickPlacement = System.Windows.Controls.Primitives.TickPlacement.BottomRight };
+            var committed = index;
+            sl.ValueChanged += (_, _) =>
+            {
+                var i = (int)Math.Round(sl.Value);
+                head.Text = $"{title}: {labels[i]}";
+                if (i == committed) return;   // пишем раз на каждое новое деление (Пр.133.A)
+                committed = i;
+                SettingsStore.update(ctx, pick(SettingsStore.current(), i));
+                var now = SettingsStore.current();
+                topCost.Text = OptimizeBlock.topCostLine(now); checkCost.Text = OptimizeBlock.checkCostLine(now); total.Text = OptimizeBlock.totalLine(now);
+                // Состав строк меняется только при «перемер выкл ↔ вкл» — тогда пересобрать (не трогая ползунок на каждом делении).
+                if ((now.activeOptimizeSec > 0) != wasOn) Dispatcher.BeginInvoke(buildOptimize);
+            };
+            OptimizePanel.Children.Add(head);
+            OptimizePanel.Children.Add(sl);
+            OptimizePanel.Children.Add(small(string.Join(" · ", labels)));
+        }
+        slider("Перемер «держать лучший»", OptimizeBlock.OPT_LABELS, OptimizeBlock.optimizeIndex(s), OptimizeBlock.pickOptimize);
+        addRows(OptimizePanel, OptimizeBlock.rows(s).Take(2));
+        OptimizePanel.Children.Add(small(OptimizeBlock.FRESH_HINT));
+        if (wasOn)
+        {
+            addRows(OptimizePanel, OptimizeBlock.rows(s).Skip(2));
+            OptimizePanel.Children.Add(small(OptimizeBlock.TOP_HINT));
+            OptimizePanel.Children.Add(topCost);
+        }
+        else OptimizePanel.Children.Add(small(OptimizeBlock.OFF_HINT));
+        slider("Проверка связи (оба режима)", OptimizeBlock.CHK_LABELS, OptimizeBlock.checkIndex(s), OptimizeBlock.pickCheck);
+        OptimizePanel.Children.Add(checkCost);
+        OptimizePanel.Children.Add(total);
     }
 
     private void OnResetSettings(object sender, RoutedEventArgs e)
