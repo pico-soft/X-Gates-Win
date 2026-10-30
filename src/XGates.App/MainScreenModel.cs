@@ -71,7 +71,21 @@ public sealed record MainSnapshot(
     (int code, string name)? updateBanner,
     bool whiteListModeActive,
     bool stopWordsSuspended,
-    string modeLine);
+    string modeLine,
+    EnableSourcesPrompt? enablePrompt,   // «Нет живых серверов — включить выключенные источники?» (AppRoot Kotlin)
+    string remeasureStatus,
+    bool remeasuring);
+
+/// <summary>Диалог деталей сервера (ServerDetailDialog Kotlin): строки «ключ — значение» и состояние кнопок.</summary>
+public sealed record ServerDetails(
+    string name,
+    IReadOnlyList<(string key, string value)> rows,
+    bool hasCustomName,
+    bool blockedByKey,
+    bool blockedByWord,
+    bool paused,
+    string pauseHint,
+    string blockHint);
 
 /**
  * «Главная» — порт состояния и обработчиков BootScreen (MainActivity.kt) без отрисовки: те же имена функций
@@ -116,6 +130,8 @@ public sealed class MainScreenModel : IDisposable
     private string? lastServerKey;
     private bool lastRunning;
     private CancellationTokenSource? ipDelay;
+    private string remeasureStatus = "";
+    private bool remeasuring;
 
     public MainScreenModel(Context context, IUiThread ui)
     {
@@ -135,6 +151,7 @@ public sealed class MainScreenModel : IDisposable
         TunnelHealth.state.changed += onHealthChanged;
         TunnelSpeed.state.changed += onAnyChanged;
         UpdateStore.record.changed += onAnyChanged;
+        MonitorPrompt.state.changed += onAnyChanged;
 
         // Периодически перечитываем реестр (монитор пингует/мерит в фоне) — давности живые; не во время ручного теста.
         reloadTimer = new Timer(_ => post(() => { if (!fullTesting && !checking) reloadServers(); }), null, 15_000, 15_000);
@@ -155,6 +172,7 @@ public sealed class MainScreenModel : IDisposable
         TunnelHealth.state.changed -= onHealthChanged;
         TunnelSpeed.state.changed -= onAnyChanged;
         UpdateStore.record.changed -= onAnyChanged;
+        MonitorPrompt.state.changed -= onAnyChanged;
         reloadTimer.Dispose(); ipTimer.Dispose();
         ipDelay?.Cancel();
     }
@@ -567,6 +585,94 @@ public sealed class MainScreenModel : IDisposable
         }, "auto-start");
     });
 
+    // ── «Нет живых серверов» (AppRoot Kotlin): предложение включить выключенные источники. Сами НЕ включаем. ──
+    public void acceptEnablePrompt()
+    {
+        MonitorPrompt.clear(); NotificationHelper.cancelEnableSources(context);
+        KThread.start(() =>
+        {
+            SubscriptionManager.enableAllDisabled(context);
+            SubscriptionManager.refreshAllEnabled(context, cancelled: () => false, onEach: (_, _) => { });
+            MonitorPrompt.resetDeclined();
+            MonitorCoordinator.wake();   // продолжить перебор с начала
+            ui(() => { reloadSources(); reloadServers(); });
+        }, "enable-sources");
+    }
+
+    public void declineEnablePrompt() { MonitorPrompt.decline(); NotificationHelper.cancelEnableSources(context); }
+
+    // ── детали сервера (ServerDetailDialog) и действия из него ──
+    public ServerDetails details(ServerProfile p)
+    {
+        var bl = BlocklistStore.current();
+        var k = SubscriptionManager.serverKey(p);
+        var proxy = ProxyState.state.value;
+        string v(string? x) => string.IsNullOrWhiteSpace(x) ? "—" : x;
+        var rows = new List<(string, string)>();
+        var custom = bl.customName(k) != null;
+        if (custom) rows.Add(("Имя от сервера", providerName(p)));
+        rows.Add(("Протокол", p.protocol.ToString()));
+        rows.Add(("Адрес", $"{p.address}:{p.port}"));
+        rows.Add(("Транспорт", p.network));
+        rows.Add(("Безопасность", XGates.Core.Xray.Link.ServerProfileKt.normalizeStreamSecurity(p.security)));
+        rows.Add(("SNI", v(p.sni)));
+        rows.Add(("Fingerprint", v(p.fingerprint)));
+        rows.Add(("Flow", v(p.flow)));
+        var upload = proxy.running && proxy.serverKey == k ? activeUploadMbps : null;   // отдача — только у активного
+        if (upload is > 0) rows.Add(("Отдача", $"{r1(upload.Value)} Мбит/с"));
+        var paused = bl.isPaused(k);
+        var blockedByKey = bl.isServerBlocked(k);
+        return new ServerDetails(displayName(p, bl), rows, custom, blockedByKey,
+            bl.matchesWord(providerName(p), bl.customName(k)), paused,
+            paused ? "Отложен: не в «Живых» и автовыборе; вернётся в список." : "Отложить: убрать из «Живых» и автовыбора (виден в «Все серверы»).",
+            blockedByKey ? "В стоп-листе: скрыт отовсюду; снять — здесь или Настройки → Стоп-лист." : "Стоп-лист: скрыть ОТОВСЮДУ (возврат через Настройки → Стоп-лист).");
+    }
+
+    public void toggleBlock(ServerProfile p) => ui(() =>
+    {
+        var bl = BlocklistStore.current(); var k = SubscriptionManager.serverKey(p);
+        if (bl.isServerBlocked(k)) BlocklistStore.unblockServer(context, k);
+        else BlocklistStore.blockServer(context, k, displayName(p, bl), JavaSystem.currentTimeMillis());
+        remeasureStatus = "";
+    });
+
+    public void resetName(ServerProfile p) => ui(() => { BlocklistStore.clearName(context, SubscriptionManager.serverKey(p)); remeasureStatus = ""; });
+
+    /// <summary>Сколько серверов с тем же ИСХОДНЫМ именем (опция «применить ко всем» в диалоге переименования).</summary>
+    public int sameOriginalCount(ServerProfile p) { var o = providerName(p); return servers.Count(it => providerName(it) == o); }
+
+    /// <summary>Переименовать (пустое имя = вернуть имя от сервера); [applyAll] — всем с тем же исходным именем.</summary>
+    public void renameServer(ServerProfile p, string newName, bool applyAll) => ui(() =>
+    {
+        var original = providerName(p);
+        var targets = applyAll ? servers.Where(it => providerName(it) == original).ToList() : [p];
+        BlocklistStore.rename(context, targets.Select(it => (SubscriptionManager.serverKey(it), providerName(it))).ToList(), newName, JavaSystem.currentTimeMillis());
+    });
+
+    /// <summary>Отладка расхождения скорости: перемерить ОДИН сервер temp-инстансом, без параллели, с полным логом.</summary>
+    public void onRemeasure(ServerProfile p) => ui(() =>
+    {
+        if (remeasuring) return;
+        remeasuring = true;
+        remeasureStatus = "меряю… (лог: тег ServerSpeedTester)";
+        var key = SubscriptionManager.serverKey(p);
+        KThread.start(() =>
+        {
+            var m = ServerSpeedTester.measureSpeedDetailed(context, p);
+            SubscriptionManager.applySpeedResults(context, new Dictionary<string, double> { [key] = m.mbps });   // -1 при провале
+            ui(() =>
+            {
+                speedResults = new(speedResults) { [key] = m.mbps };
+                speedResultsAt = new(speedResultsAt) { [key] = JavaSystem.currentTimeMillis() };
+                remeasureStatus = m.ok ? $"результат: {m.mbps} Мбит/с" : $"НЕ ИЗМЕРЕНО — {m.reason}";
+                remeasuring = false;
+                reloadServers();
+            });
+        }, "remeasure");
+    });
+
+    public void clearRemeasureStatus() => ui(() => remeasureStatus = "");
+
     // ── снимок для отрисовки (тот же расчёт, что в теле BootScreen) ──
     public MainSnapshot snapshot()
     {
@@ -665,6 +771,9 @@ public sealed class MainScreenModel : IDisposable
             updateBanner: UpdateStore.bannerVersion(settings.notifyNewVersions),
             whiteListModeActive: settings.whiteListModeActive,
             stopWordsSuspended: BlocklistStore.stopWordsSuspended.value,
-            modeLine: $"Режим: {(save ? "экономия" : "обычный")} · {reason} ›");
+            modeLine: $"Режим: {(save ? "экономия" : "обычный")} · {reason} ›",
+            enablePrompt: MonitorPrompt.state.value,
+            remeasureStatus: remeasureStatus,
+            remeasuring: remeasuring);
     }
 }
