@@ -168,8 +168,8 @@ public static class UpdateFlowController
     private static volatile string? readyFile;
     private static volatile int readyForCode;
 
-    /// <summary>Запуск установщика (подменяем в тестах: на Linux msiexec нет).</summary>
-    internal static Func<string, bool> launchInstaller = UpdateInstaller.startInstall;
+    /// <summary>Запуск установщика. Приложение ставит свой (установить и открыть новую версию); тесты — подмену.</summary>
+    public static Func<string, bool> launchInstaller { get; set; } = UpdateInstaller.startInstall;
 
     public static void cancel() => cancelFlag = true;
 
