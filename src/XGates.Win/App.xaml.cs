@@ -71,9 +71,19 @@ public partial class App : Application
         SystemEvents.PowerModeChanged += (_, a) =>
         {
             XrayProxyService.onPowerChanged();
-            if (a.Mode == PowerModes.Resume) XrayProxyService.onNetworkChanged();   // после сна сеть «новая»
+            if (a.Mode == PowerModes.Suspend) Device.screenOn = false;
+            if (a.Mode == PowerModes.Resume) { Device.screenOn = true; XrayProxyService.onNetworkChanged(); }   // после сна сеть «новая»
         };
-        SystemEvents.SessionSwitch += (_, a) => { if (a.Reason == SessionSwitchReason.SessionUnlock) XrayProxyService.onScreenOn(); };
+        // «Экран» для монитора (Device.screenOn): заблокирован сеанс = экран выключен (реже фоновые пробы, как Doze).
+        SystemEvents.SessionSwitch += (_, a) =>
+        {
+            if (a.Reason is SessionSwitchReason.SessionLock or SessionSwitchReason.ConsoleDisconnect) Device.screenOn = false;
+            if (a.Reason is SessionSwitchReason.SessionUnlock or SessionSwitchReason.ConsoleConnect)
+            {
+                Device.screenOn = true;
+                XrayProxyService.onScreenOn();
+            }
+        };
 
         var fromLogin = e.Args.Contains(Autostart.ARG);
         if (fromLogin)
