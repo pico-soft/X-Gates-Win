@@ -129,4 +129,25 @@ public sealed class ServerActionsTests : IDisposable
         Assert.Null(Snap().enablePrompt);
         Assert.False(MonitorPrompt.declined);
     }
+
+    [Fact]
+    public void Hidden_live_protocols_hint_and_show_action()
+    {
+        var u = LocalTestNet.Uuid;
+        Import($"trojan://pw@10.0.3.1:443?security=tls&sni=a.example#t1\ntrojan://pw@10.0.3.2:443?security=tls&sni=a.example#t2");
+        var saved = SettingsStore.current();
+        try
+        {
+            SettingsStore.update(ctx, saved with { allowedProtocols = [XGates.Core.Xray.Link.Protocol.VLESS] });
+            // Живые по пингу, но протокол скрыт фильтром.
+            SubscriptionManager.applyPingResults(ctx, SubscriptionManager.allServers(ctx).ToDictionary(SubscriptionManager.serverKey, _ => 120));
+            model.reloadAll();
+            var s = Snap();
+            Assert.Equal("Есть живые серверы, скрытые фильтром протоколов (TROJAN): 2. Нажмите, чтобы показать их.", s.hiddenLiveHint);
+            model.showHiddenProtocols();
+            Assert.True(WaitUntil(() => SettingsStore.current().allowedProtocols.Contains(XGates.Core.Xray.Link.Protocol.TROJAN), 5_000));
+            Assert.True(WaitUntil(() => Snap().hiddenLiveHint == "", 5_000));
+        }
+        finally { SettingsStore.update(ctx, saved); }
+    }
 }
