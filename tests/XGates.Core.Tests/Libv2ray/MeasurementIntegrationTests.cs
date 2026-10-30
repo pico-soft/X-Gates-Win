@@ -24,7 +24,8 @@ public sealed class MeasurementIntegrationTests : IDisposable
 
     public MeasurementIntegrationTests()
     {
-        ServerSpeedTester.probesOverrideForTest = [$"http://127.0.0.1:{net.HttpPort}/bytes?n=30000000"];
+        // slow=1: на петле 100 КБ иначе приходят быстрее 1 мс → «нулевое окно» и редкие ложные провалы замера.
+        ServerSpeedTester.probesOverrideForTest = [$"http://127.0.0.1:{net.HttpPort}/bytes?n=30000000&slow=1"];
     }
 
     public void Dispose()
