@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\XGates.Core\XGates.Core.csproj" />
+    <ProjectReference Include="..\..\src\XGates.App\XGates.App.csproj" />
   </ItemGroup>
 
   <!-- Эталонные данные (golden), снятые с Kotlin-кода Android: tools/golden/. -->

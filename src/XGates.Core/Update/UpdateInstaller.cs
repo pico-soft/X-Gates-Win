@@ -92,6 +92,19 @@ public static class UpdateInstaller
         try { return new Uri(url).Host; } catch (Exception) { return url; }
     }
 
+    /**
+     * Уборка на старте (аналог pruneObsoleteApks): если более новой версии, чем установлена, не ожидается — всё в
+     * каталоге обновлений отработало (установщик уже поставил эту версию) → удаляем. Ждёт новая — не трогаем:
+     * проверенный файл переиспользуется без повторной загрузки.
+     */
+    public static void pruneObsolete(Context context)
+    {
+        var dir = Path.Combine(context.filesDir, DIR);
+        if (!Directory.Exists(dir)) return;
+        if (UpdateStore.record.value.availCode > UpdateChecker.currentVersionCode()) return;
+        foreach (var f in Directory.GetFiles(dir)) tryDelete(f);
+    }
+
     public static string sha256(string file)
     {
         using var f = File.OpenRead(file);
@@ -144,6 +157,10 @@ public static class UpdateFlowController
 
     /// <summary>Как закрыть приложение после запуска установщика (ставит UI: выход из трея с остановкой ядра).</summary>
     public static Action exitApp { get; set; } = () => { };
+
+    // Пункт 2 Android: приложение на переднем плане? (окно на экране; ставит приложение в onResume/onPause.)
+    // На Windows установщик запускается и из трея — флаг нужен «Главной»: IP освежаем, только когда смотрят.
+    public static volatile bool appInForeground;
 
     private static volatile bool running;
     private static volatile bool cancelFlag;

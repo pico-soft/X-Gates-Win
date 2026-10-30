@@ -9,6 +9,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="XGates.Core.Tests" />
+    <!-- Логика экранов пользуется теми же Kotlin-совместимыми строковыми функциями (паритет текста). -->
+    <InternalsVisibleTo Include="XGates.App" />
   </ItemGroup>
 
 </Project>

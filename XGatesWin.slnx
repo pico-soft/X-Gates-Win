@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/XGates.App/XGates.App.csproj" />
     <Project Path="src/XGates.Core/XGates.Core.csproj" />
     <Project Path="src/XGates.Win/XGates.Win.csproj" />
   </Folder>

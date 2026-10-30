@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Логика экранов (аналог состояния и обработчиков composable-экранов MainActivity.kt) БЕЗ WPF:
+       собирается и тестируется на Linux; XGates.Win лишь рисует её и пробрасывает события. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>XGates.App</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="XGates.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\XGates.Core\XGates.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -123,11 +123,13 @@ public static class ServerSpeedTester
     // tele2 как запасной (distinct убирает дубль основного из настроек). httpbin отвергнут (http=100, 15с).
     // Дефолт uploadProbeUrl в SettingsStore теперь cloudflare __up; на устройствах со старым (tele2) сохранённым
     // значением сток обрезает жёсткий потолок UPLOAD_HARD_CAP_MS в uploadMbps.
-    private static readonly IReadOnlyList<string> uploadFallbacks =
+    private static readonly IReadOnlyList<string> uploadFallbacksDefault =
     [
         "https://speed.cloudflare.com/__up",
         "http://speedtest.tele2.net/upload.php",
     ];
+    /// <summary>Запасные адреса отдачи; тесты подменяют (герметичность: без выхода в интернет через стенд).</summary>
+    internal static IReadOnlyList<string> uploadFallbacks { get; set; } = uploadFallbacksDefault;
     // Промпт 104.B: жёсткий потолок ОБЩЕГО времени одного замера отдачи. Кооперативное окно (measureMs) между
     // записями НЕ спасает, если приёмник не отвечает / канал насыщён (одна запись блокируется). Отдача display-only —
     // не даём ей быть 25-75с стоком в КАЖДОМ активном замере. Потолок от первой записи (коннект ограничен отдельно).

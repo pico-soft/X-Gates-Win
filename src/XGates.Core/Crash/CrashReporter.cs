@@ -64,10 +64,10 @@ public static class CrashReporter
         appContext = context.applicationContext;
         versionName = appVersionName;
         versionCode = appVersionCode;
-        if (Interlocked.Exchange(ref installed, 1) == 1) return;   // повторный install — обработчики уже стоят
         // Фоновые потоки порта (KThread) процесс НЕ роняют (docs/decisions.md, «потоки»), но отчёт пишем — как на
         // Android, где такое исключение = падение с отчётом. Иначе ошибка в поле осталась бы невидимой.
         KThread.onUncaught = (name, ex) => report(name, ex);
+        if (Interlocked.Exchange(ref installed, 1) == 1) return;   // повторный install — обработчик процесса уже стоит
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
         {
             // .NET после этого события завершит процесс сам — «дать упасть штатно».

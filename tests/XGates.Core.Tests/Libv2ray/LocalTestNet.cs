@@ -144,8 +144,10 @@ public sealed class LocalTestNet : IDisposable
                         {
                             // chunked POST: читаем до терминатора «0\r\n\r\n», отвечаем 200
                             var tailBuf = all;
+                            var slowUp = target.Contains("slow=1");   // медленный приём: на петле отдача иначе даёт «нулевое окно»
                             while (!tailBuf.Contains("\r\n0\r\n\r\n") && !tailBuf.StartsWith("0\r\n\r\n"))
                             {
+                                if (slowUp) await Task.Delay(2, cts.Token);
                                 int m = await s.ReadAsync(buf, cts.Token);
                                 if (m == 0) return;
                                 tailBuf = tailBuf.Length > 16 ? tailBuf.Substring(tailBuf.Length - 16) : tailBuf;
