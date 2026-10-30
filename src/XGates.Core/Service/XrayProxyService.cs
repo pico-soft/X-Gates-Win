@@ -236,6 +236,16 @@ public static class XrayProxyService
                 if (d != null) TrafficTracker.addTunnel(d.Value.down, d.Value.up);
                 XrayController.stop();   // авто-переключение сервера
             }
+            // Windows (§13.7): порт занят ДРУГОЙ программой → понятная причина вместо «ядро не запустилось».
+            // Наш прежний туннель уже остановлен выше, так что занятость — чужая.
+            var busy = new[] { XrayConfig.SOCKS_PORT, XrayConfig.HTTP_PORT }.Where(p => !XrayConfig.portFree(p)).ToList();
+            if (busy.Count > 0)
+            {
+                ProxyState.update(running: false, label: label, serverKey: serverKey,
+                    message: $"Порт {string.Join(" и ", busy)} занят другой программой — закройте её или смените порт в «Настройки → Локальный прокси»");
+                NotificationHelper.clearStatus();
+                return;
+            }
             bool ok;
             try { ok = XrayController.start(app!, config); }
             catch (Exception e)

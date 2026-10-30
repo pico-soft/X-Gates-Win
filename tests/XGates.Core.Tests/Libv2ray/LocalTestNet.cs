@@ -26,6 +26,9 @@ public sealed class LocalTestNet : IDisposable
     /// <summary>Отдать файл по ТОЧНОМУ пути (без query) — «поддельный GitHub» для обновлялки.</summary>
     public System.Collections.Concurrent.ConcurrentDictionary<string, byte[]> Files { get; } = new();
 
+    /// <summary>Сырой ответ целиком (статус+заголовки+тело) по ТОЧНОМУ пути — для проверок разбора ответа прокси.</summary>
+    public System.Collections.Concurrent.ConcurrentDictionary<string, byte[]> RawResponses { get; } = new();
+
     /// <summary>302 по ТОЧНОМУ пути → Location (как releases/latest/download → releases/download/&lt;тег&gt;).</summary>
     public System.Collections.Concurrent.ConcurrentDictionary<string, string> Redirects { get; } = new();
 
@@ -125,6 +128,11 @@ public sealed class LocalTestNet : IDisposable
                         {
                             await s.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {file.Length}\r\n\r\n"), cts.Token);
                             await s.WriteAsync(file, cts.Token);
+                            continue;
+                        }
+                        if (RawResponses.TryGetValue(exact, out var raw))
+                        {
+                            await s.WriteAsync(raw, cts.Token);
                             continue;
                         }
                         if (Redirects.TryGetValue(exact, out var loc))

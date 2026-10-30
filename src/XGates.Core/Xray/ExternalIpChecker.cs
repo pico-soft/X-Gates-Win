@@ -64,7 +64,7 @@ public static partial class ExternalIpChecker
      * Быстрая проверка прохода для подбора (Пр.146.Ф2): 1 эндпоинт × короткий таймаут. НЕ полные 3×5с — при
      * переборе кандидатов важна скорость, а один свежий проход через туннель уже доказывает живость.
      */
-    public static bool probePass(int socksPort = XrayConfig.SOCKS_PORT, int timeoutMs = 4000) =>
+    public static bool probePass(int? socksPort = null, int timeoutMs = 4000) =>   // null = порт из настроек (как дефолт Kotlin — на момент вызова)
         fetch(socksPort, timeoutMs, maxEndpoints: 1) != null;
 
     /**
@@ -74,7 +74,7 @@ public static partial class ExternalIpChecker
      * активный туннель отвечает честно. Свежий сокет (Пр.144) → честно падает, если туннель мёртв (не кэш).
      * Возврат мс (≥0) или -1 (нет прохода). Блокирующий — звать на фоне.
      */
-    public static int latencyMs(int socksPort = XrayConfig.SOCKS_PORT, string host = "www.gstatic.com", string path = "/generate_204", int timeoutMs = 4000, int port = 80)
+    public static int latencyMs(int? socksPort = null, string host = "www.gstatic.com", string path = "/generate_204", int timeoutMs = 4000, int port = 80)
     {
         Socket? raw = null;
         try
@@ -83,7 +83,7 @@ public static partial class ExternalIpChecker
             // (не ждёт коннекта до бэкенда) → ~1 мс (фейк). Меряем РЕАЛЬНЫЙ round-trip: HTTP-запрос (без TLS) и время
             // до ПЕРВОГО БАЙТА ответа = полный проход туда-обратно через туннель до бэкенда. gstatic /generate_204 —
             // крошечный ответ (204). Работает и для xhttp/reality (обычный трафик проходит), в отличие от cold-start пинга.
-            raw = Socks5.Connect(socksPort, host, port, timeoutMs);   // SOCKS сам резолвит (как трафик)
+            raw = Socks5.Connect(socksPort ?? XrayConfig.SOCKS_PORT, host, port, timeoutMs);   // SOCKS сам резолвит (как трафик)
             raw.ReceiveTimeout = timeoutMs;
             var req = $"GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: curl/8.0\r\nConnection: close\r\n\r\n";
             var t0 = JavaSystem.nanoTime();
@@ -104,7 +104,7 @@ public static partial class ExternalIpChecker
     }
 
     /// <summary>Единая точка запроса внешнего адреса. Блокирующий — запускать на фоновом потоке (как и раньше).</summary>
-    public static string? fetch(int socksPort = XrayConfig.SOCKS_PORT, int timeoutMs = TIMEOUT_MS, int maxEndpoints = int.MaxValue)
+    public static string? fetch(int? socksPort = null, int timeoutMs = TIMEOUT_MS, int maxEndpoints = int.MaxValue)
     {
         lock (@lock)
         {
@@ -127,7 +127,8 @@ public static partial class ExternalIpChecker
             var n = Interlocked.Increment(ref concurrentNow);
             if (n > maxConcurrentSeen) maxConcurrentSeen = n;
             Interlocked.Increment(ref onceCount);
-            result = onceOverrideForTest?.Invoke(socksPort) ?? fetchOnce(socksPort, timeoutMs, maxEndpoints);
+            var sp = socksPort ?? XrayConfig.SOCKS_PORT;
+            result = onceOverrideForTest?.Invoke(sp) ?? fetchOnce(sp, timeoutMs, maxEndpoints);
         }
         finally
         {
