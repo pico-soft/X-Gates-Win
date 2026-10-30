@@ -11,7 +11,9 @@ using XGates.Core.Crash;
 using XGates.Core.Platform;
 using XGates.Core.Service;
 using XGates.Core.Settings;
+using XGates.Core.Monitor;
 using XGates.Core.Subscription;
+using XGates.Core.Traffic;
 using XGates.Core.Update;
 using XGates.Core.Xray;
 using XGates.Core.Xray.Link;
@@ -49,7 +51,12 @@ public partial class MainWindow : Window
         blocklist = new BlocklistModel(ctx);
         InitializeComponent();
         // Перерисовка не чаще ~4 раз в секунду: тики теста идут десятками в секунду (как отдельный StateFlow бара в Kotlin).
-        redraw = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background, (_, _) => { if (dirty) render(); }, Dispatcher);
+        var ticks = 0;
+        redraw = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background, (_, _) =>
+        {
+            if (dirty) render();
+            if (++ticks % 4 == 0 && IsVisible && Tabs.SelectedItem == SettingsTab) renderStats();   // время «N с назад», трафик
+        }, Dispatcher);
         main.changed += () => dirty = true;
         subs.changed += () => dirty = true;
         TestProgress.state.changed += _ => dirty = true;
@@ -373,9 +380,6 @@ public partial class MainWindow : Window
         HowToText.Text = howTo(w.socksPort, w.httpPort);
         var s = SettingsStore.current();
         try { LaunchAtLogin.IsChecked = Autostart.isEnabled(); } catch (Exception) { LaunchAtLogin.IsChecked = false; }
-        AutoConnect.IsChecked = s.autoStartOnLaunch;
-        MonitorEnabled.IsChecked = s.monitorEnabled;
-        NotifyNewVersions.IsChecked = s.notifyNewVersions;
         ProtocolsPanel.Children.Clear();
         foreach (var p in Enum.GetValues<Protocol>())
         {
@@ -383,8 +387,123 @@ public partial class MainWindow : Window
             cb.Click += OnProtocolToggle;
             ProtocolsPanel.Children.Add(cb);
         }
+        buildParams();
         renderSettingsLive();
         renderBlocklist();
+        renderStats();
+    }
+
+    /// <summary>Строки «Параметров» (SettingsRows): ввод сохраняется сразу, если значение годится (как в Android).</summary>
+    private void buildParams()
+    {
+        ParamsPanel.Children.Clear();
+        string? group = null;
+        foreach (var row in SettingsRows.rows)
+        {
+            if (row.group != group)
+            {
+                group = row.group;
+                ParamsPanel.Children.Add(new TextBlock { Text = group, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 10, 0, 4) });
+            }
+            var s = SettingsStore.current();
+            var hint = new TextBlock { Text = $"деф. {row.defaultText}", Foreground = (Brush)FindResource("Gray"), FontSize = 11, Visibility = V(row.changed(s)) };
+            var left = new StackPanel();
+            left.Children.Add(new TextBlock { Text = row.title, TextWrapping = TextWrapping.Wrap });
+            left.Children.Add(hint);
+            var line = new DockPanel { Margin = new Thickness(0, 2, 0, 2) };
+            FrameworkElement control;
+            if (row.kind == SettingKind.BOOL)
+            {
+                var cb = new CheckBox { IsChecked = row.read(s) == "true", VerticalAlignment = VerticalAlignment.Center };
+                cb.Click += (_, _) =>
+                {
+                    if (row.commit(SettingsStore.current(), cb.IsChecked == true ? "true" : "false") is { } n) SettingsStore.update(ctx, n);
+                    hint.Visibility = V(row.changed(SettingsStore.current()));
+                };
+                control = cb;
+            }
+            else
+            {
+                var tb = new TextBox { Text = row.read(s), Width = row.kind == SettingKind.TEXT ? double.NaN : 110, VerticalAlignment = VerticalAlignment.Center };
+                var normal = tb.BorderBrush;
+                tb.TextChanged += (_, _) =>
+                {
+                    var n = row.commit(SettingsStore.current(), tb.Text);
+                    tb.BorderBrush = n == null ? Brushes.Firebrick : normal;
+                    if (n != null && n != SettingsStore.current()) SettingsStore.update(ctx, n);
+                    hint.Visibility = V(row.changed(SettingsStore.current()));
+                };
+                control = tb;
+            }
+            if (row.kind == SettingKind.TEXT)
+            {
+                var col = new StackPanel { Margin = new Thickness(0, 2, 0, 4) };
+                col.Children.Add(left); col.Children.Add(control);
+                ParamsPanel.Children.Add(col);
+                continue;
+            }
+            DockPanel.SetDock(control, Dock.Right);
+            line.Children.Add(control);
+            line.Children.Add(left);
+            ParamsPanel.Children.Add(line);
+        }
+    }
+
+    private void OnResetSettings(object sender, RoutedEventArgs e)
+    {
+        if (MessageBox.Show(this, "Вернуть все настройки к значениям по умолчанию? Подписки, стоп-лист и порты не затрагиваются.", "Сброс настроек",
+                MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
+        SettingsStore.resetToDefaults(ctx);
+        loadSettings();
+    }
+
+    /// <summary>Признак жизни, журнал (последние 100) и трафик — обновляются раз в секунду, пока открыты «Настройки».</summary>
+    private void renderStats()
+    {
+        var hb = StatsModel.heartbeatLine(SettingsStore.current(), MonitorStatus.state.value, JavaSystem.currentTimeMillis());
+        HeartbeatLine.Text = hb;
+        HeartbeatLine.Visibility = V(hb.Length > 0);
+        JournalTitle.Text = StatsModel.journalTitle();
+        var j = StatsModel.journal();
+        if (JournalPanel.Tag as int? != MonitorLog.state.value.Count)   // перестраиваем только при новых событиях
+        {
+            JournalPanel.Tag = MonitorLog.state.value.Count;
+            JournalPanel.Children.Clear();
+            if (j.Count == 0) JournalPanel.Children.Add(new TextBlock { Text = StatsModel.JOURNAL_EMPTY, Foreground = (Brush)FindResource("Gray"), TextWrapping = TextWrapping.Wrap });
+            foreach (var (kind, line, detail) in j.Take(100))
+            {
+                var color = kind switch { "switch" => B(0xFF1565C0), "error" => B(0xFFD32F2F), "net" => B(0xFFF9A825), _ => Brushes.Black };
+                JournalPanel.Children.Add(new TextBlock { Text = line, Foreground = color, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
+                if (detail.Length > 0) JournalPanel.Children.Add(new TextBlock { Text = detail, Foreground = (Brush)FindResource("Gray"), FontSize = 11, TextWrapping = TextWrapping.Wrap });
+            }
+        }
+        TrafficPanel.Children.Clear();
+        foreach (var block in StatsModel.traffic(TrafficTracker.state.value, StatsModel.nowElapsed()))
+        {
+            TrafficPanel.Children.Add(new TextBlock { Text = block.title, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 8, 0, 2) });
+            foreach (var (label, value, bold) in block.rows)
+            {
+                var d = new DockPanel();
+                var v = new TextBlock { Text = value, FontWeight = bold ? FontWeights.Bold : FontWeights.Normal };
+                DockPanel.SetDock(v, Dock.Right);
+                d.Children.Add(v);
+                d.Children.Add(new TextBlock { Text = label, FontWeight = bold ? FontWeights.Bold : FontWeights.Normal });
+                TrafficPanel.Children.Add(d);
+            }
+        }
+    }
+
+    private void OnClearJournal(object sender, RoutedEventArgs e) { MonitorLog.clear(ctx); renderStats(); }
+    private void OnResetTrafficSession(object sender, RoutedEventArgs e) { TrafficTracker.resetSession(); renderStats(); }
+    private void OnResetTrafficToday(object sender, RoutedEventArgs e)
+    {
+        if (MessageBox.Show(this, StatsModel.resetTodayText(TrafficTracker.state.value), "Сбросить за сутки?", MessageBoxButton.OKCancel) == MessageBoxResult.OK)
+        { TrafficTracker.resetToday(); renderStats(); }
+    }
+    private void OnResetTrafficAll(object sender, RoutedEventArgs e)
+    {
+        if (MessageBox.Show(this, StatsModel.resetAllText(TrafficTracker.state.value), "Стереть всю историю?", MessageBoxButton.OKCancel, MessageBoxImage.Warning) == MessageBoxResult.OK)
+        { TrafficTracker.resetAll(); renderStats(); }
     }
 
     /// <summary>Инструкции (текст можно выделить и скопировать). Порты — текущие.</summary>
@@ -510,9 +629,6 @@ public partial class MainWindow : Window
         try { LaunchAtLogin.IsChecked = Autostart.isEnabled(); } catch (Exception) { }
         SettingsStore.update(ctx, SettingsStore.current() with { startOnBoot = LaunchAtLogin.IsChecked == true });
     }
-    private void OnAutoConnect(object sender, RoutedEventArgs e) => SettingsStore.update(ctx, SettingsStore.current() with { autoStartOnLaunch = AutoConnect.IsChecked == true });
-    private void OnMonitorEnabled(object sender, RoutedEventArgs e) => SettingsStore.update(ctx, SettingsStore.current() with { monitorEnabled = MonitorEnabled.IsChecked == true });
-    private void OnNotifyNewVersions(object sender, RoutedEventArgs e) => SettingsStore.update(ctx, SettingsStore.current() with { notifyNewVersions = NotifyNewVersions.IsChecked == true });
     private void OnProtocolToggle(object sender, RoutedEventArgs e)
     {
         if (sender is not CheckBox { Tag: Protocol p } cb) return;

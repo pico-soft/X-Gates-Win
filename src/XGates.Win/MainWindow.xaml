@@ -250,11 +250,29 @@
 
                     <TextBlock Style="{StaticResource Section}" Text="Запуск" />
                     <CheckBox x:Name="LaunchAtLogin" Content="Запускать при входе в Windows (в трее, с последним сервером)" Click="OnLaunchAtLogin" Margin="0,2" />
-                    <CheckBox x:Name="AutoConnect" Content="При открытии: сразу подключиться и подобрать самый быстрый" Click="OnAutoConnect" Margin="0,2" />
-                    <CheckBox x:Name="MonitorEnabled" Content="Автомониторинг: держать лучший сервер (перемер в фоне)" Click="OnMonitorEnabled" Margin="0,2" />
 
                     <TextBlock Style="{StaticResource Section}" Text="Протоколы" />
                     <WrapPanel x:Name="ProtocolsPanel" />
+
+                    <TextBlock Style="{StaticResource Section}" Text="Параметры" />
+                    <StackPanel x:Name="ParamsPanel" />
+                    <Button Content="Сбросить настройки к значениям по умолчанию" Click="OnResetSettings" HorizontalAlignment="Left" Margin="0,8,0,0" />
+
+                    <TextBlock Style="{StaticResource Section}" Text="Автомониторинг" />
+                    <TextBlock x:Name="HeartbeatLine" Foreground="{StaticResource Accent}" FontSize="12" TextWrapping="Wrap" />
+                    <DockPanel Margin="0,8,0,4">
+                        <Button DockPanel.Dock="Right" Content="Очистить" Click="OnClearJournal" Padding="8,1" Margin="0" />
+                        <TextBlock x:Name="JournalTitle" FontWeight="Bold" VerticalAlignment="Center" />
+                    </DockPanel>
+                    <StackPanel x:Name="JournalPanel" />
+
+                    <TextBlock Style="{StaticResource Section}" Text="Трафик" />
+                    <StackPanel x:Name="TrafficPanel" />
+                    <WrapPanel Margin="0,4,0,0">
+                        <Button Content="Сбросить: с запуска" Click="OnResetTrafficSession" />
+                        <Button Content="Сбросить: за сутки" Click="OnResetTrafficToday" />
+                        <Button Content="Стереть всю историю" Click="OnResetTrafficAll" />
+                    </WrapPanel>
 
                     <TextBlock Style="{StaticResource Section}" Text="Стоп-лист" />
                     <TextBlock Foreground="{StaticResource Gray}" TextWrapping="Wrap" Text="Слово (часть имени) скрывает совпавшие серверы. Регистр не важен." />
@@ -267,7 +285,6 @@
                     <StackPanel x:Name="BlockedPanel" />
 
                     <TextBlock Style="{StaticResource Section}" Text="Обновления" />
-                    <CheckBox x:Name="NotifyNewVersions" Content="Сообщать о новых версиях" Click="OnNotifyNewVersions" Margin="0,2" />
                     <TextBlock x:Name="UpdateSummary" TextWrapping="Wrap" Margin="0,4" />
                     <WrapPanel>
                         <Button x:Name="UpdateCheckButton" Content="Проверить обновление" Click="OnUpdateCheck" />
