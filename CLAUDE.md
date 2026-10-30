@@ -38,5 +38,12 @@
 - JDK 21 (только для Android-справочника `app/`): `export JAVA_HOME=~/.local/opt/jdk-21 PATH=~/.local/opt/jdk-21/bin:$PATH`.
 - `dl.google.com` по IPv6 → 404: загрузки `curl -4`; Gradle уже с `preferIPv4Stack=true`.
 - `gh` (`~/.local/opt/gh/bin`) авторизован как `pico-soft`; `origin` = `pico-soft/X-Gates-Win` (закрытый). Экрана нет: UI/упаковка MSI — Windows (см. `HANDOFF.md` §10).
+  У токена `gh` НЕТ права `workflow`: файлы `.github/workflows/*` GitHub не принимает (выдать — `gh auth refresh -s
+  workflow`, решение Elyor).
+- Структура: `src/XGates.Core` (порт Kotlin-ядра), `src/XGates.App` (логика экранов без WPF — тестируется здесь),
+  `src/XGates.Win` (WPF: только отрисовка и события Windows), `tests/XGates.Core.Tests` (прогон ПОСЛЕДОВАТЕЛЬНО —
+  общие синглтоны). Ядро для тестов: `tools/xray/fetch-xray.sh`.
+- **Непроверенное на Windows** (окно, трей, MSI, workflow) — в ветке `wip/windows-shell`, не в main. В main —
+  только проверенное тестами; после проверки на Windows разложить wip по коммитам в main.
 - Телефоны (для Android-сверок) — только через `~/.local/bin/phone-adb`; нет связи → попросить Elyor
   запустить «синхронизатор» на Mac.
