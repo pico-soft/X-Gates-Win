@@ -1,17 +1,40 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- WPF-приложение X-Gates Win (аналог MainActivity + service/* Android). -->
+  <!-- WPF-приложение X-Gates Win (аналог MainActivity + системной части service/* Android): окно, трей,
+       события Windows. Логика экранов — в XGates.App (тестируется на Linux), здесь только отрисовка. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <!-- Только ради значка в трее (NotifyIcon): у WPF своего нет, а сторонний пакет ради одного значка не тянем. -->
+    <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>XGates.Win</RootNamespace>
     <AssemblyName>XGatesWin</AssemblyName>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- WinForms и WPF делят имена (Application, MessageBox, …): WinForms-типы пишем полностью. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+  </ItemGroup>
+
+  <!-- Ядро xray рядом с приложением: xray\xray.exe (+ geo-файлы). wintun.dll НЕ кладём — TUN запрещён рамками
+       продукта (docs/decisions.md). Бинарь берётся из tools/xray/fetch-xray.sh (сверка sha256). -->
+  <ItemGroup Condition="Exists('..\..\third_party\xray\windows-64\xray.exe')">
+    <None Include="..\..\third_party\xray\windows-64\xray.exe;..\..\third_party\xray\windows-64\geoip.dat;..\..\third_party\xray\windows-64\geosite.dat;..\..\third_party\xray\windows-64\LICENSE"
+          Link="xray\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\XGates.Core\XGates.Core.csproj" />
+    <ProjectReference Include="..\XGates.App\XGates.App.csproj" />
   </ItemGroup>
 
 </Project>

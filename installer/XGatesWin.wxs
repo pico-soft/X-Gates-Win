@@ -1,0 +1,43 @@
+<!--
+  Установщик X-Gates Win: MSI на ПОЛЬЗОВАТЕЛЯ, без прав администратора (docs/decisions.md §13.5).
+  WiX v5 (лицензия MS-RL, бесплатно; v6+ требует принять OSMF EULA — решение Elyor, см. HANDOFF).
+  Scope="perUserOrMachine" (WiX сам ставит ALLUSERS=2 и MSIINSTALLPERUSER=1) → установка по умолчанию в %LOCALAPPDATA%\Programs\X-Gates Win
+  (ProgramFiles перенаправляется Windows для per-user установки), без UAC. Данные приложения — отдельно,
+  %LOCALAPPDATA%\X-Gates (при удалении программы остаются: подписки и замеры пользователя не стираем).
+  UpgradeCode НЕ менять никогда: по нему новая версия заменяет старую (MajorUpgrade).
+  Сборка: tools/release (CI: .github/workflows/windows.yml).
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="X-Gates Win" Manufacturer="PICO-SOFT" Version="$(Version)"
+           UpgradeCode="82ec3c61-4bac-401a-b5c6-e774d71b65bd" Scope="perUserOrMachine" Compressed="yes"
+           Language="1049" Codepage="1251">
+    <!-- MSIINSTALLPERUSER=1 и ALLUSERS=2 добавляет сам Scope="perUserOrMachine" (явное свойство = дубль, wix build падает). -->
+    <MajorUpgrade DowngradeErrorMessage="Уже установлена более новая версия X-Gates Win." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="app.ico" SourceFile="$(IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="app.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/pico-soft/X-Gates-Win" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="X-Gates Win" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <Files Include="!(bindpath.publish)\**" />
+    </ComponentGroup>
+
+    <!-- Ярлык в меню «Пуск». Автозапуск при входе — НЕ здесь: только по флажку в приложении. -->
+    <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder" Guid="5de1f64b-fdda-4abb-8e93-65643069c27e">
+      <Shortcut Id="AppShortcut" Name="X-Gates Win" Target="[INSTALLFOLDER]XGatesWin.exe" WorkingDirectory="INSTALLFOLDER" Icon="app.ico" />
+      <RegistryValue Root="HKCU" Key="Software\PICO-SOFT\X-Gates Win" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Feature Id="Main" Title="X-Gates Win">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Package>
+</Wix>
