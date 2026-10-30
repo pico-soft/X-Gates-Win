@@ -96,6 +96,8 @@ public sealed class SubscriptionsAndBootstrapTests : IDisposable
         Assert.Equal("✗", UiFormat.speedCell(-1));
         Assert.Equal("4.3 Мбит/с", UiFormat.speedCell(4.26));
         Assert.Equal("13 Мбит/с", UiFormat.speedCell(12.6));
+        Assert.Equal("3.0 Мбит/с", UiFormat.speedCell(3.0));     // Kotlin Double.toString: «.0» не теряется
+        Assert.Equal("0.0 Мбит/с", UiFormat.speedCell(0.04));
         Assert.Equal("5.0", UiFormat.r1(5));          // Kotlin Double.toString
         Assert.Equal("0.3", UiFormat.r1(0.26));
         Assert.Equal("59 сек", UiFormat.humanAgo(59_999));
@@ -110,6 +112,8 @@ public sealed class SubscriptionsAndBootstrapTests : IDisposable
         Assert.Equal("5 мин назад", UiFormat.speedAgeTextMs(JavaSystem.currentTimeMillis() - 5 * 60_000 - 1000));
         Assert.Equal("2 дн назад", UiFormat.speedAgeTextMs(JavaSystem.currentTimeMillis() - 2 * 86_400_000L - 1000));
         Assert.Equal("", UiFormat.speedAgeText("мусор"));
+        var ts = DateTime.Now.AddMinutes(-5).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal("5 мин назад", UiFormat.speedAgeText(ts + ":56"));   // нестрогий разбор, как SimpleDateFormat
 
         // Одинаковые имена различаются подписью; совпала и подпись → хвост ключа.
         var a = VlessParser.parse($"vless://{LocalTestNet.Uuid}@1.1.1.1:443?type=ws#Same")!;

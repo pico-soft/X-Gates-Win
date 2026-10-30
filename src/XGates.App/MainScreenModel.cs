@@ -60,6 +60,7 @@ public sealed record MainSnapshot(
     int hiddenCount,
     bool noProtocolsAllowed,
     IReadOnlyList<Protocol> hiddenLiveProtocols,
+    string hiddenLiveHint,      // «Есть живые серверы, скрытые фильтром протоколов (…): N. Нажмите, чтобы показать их.»
     bool serversEmpty,
     bool sourcesEmpty,
     bool fullTesting,
@@ -109,6 +110,12 @@ public sealed class MainScreenModel : IDisposable
 
     public event Action? changed;
 
+    /// <summary>
+    /// Открыта ли вкладка «Главная» (в Kotlin её эффекты живут, только пока экран на месте): периодические перечитка
+    /// реестра и подтверждение IP идут лишь тогда — на «Настройках» ipify через туннель каждые 12 с ни к чему.
+    /// </summary>
+    public volatile bool mainTabVisible = true;
+
     // ── состояние экрана (только на ui) ──
     private string subStatus = "";
     private List<ServerProfile> servers;
@@ -154,11 +161,11 @@ public sealed class MainScreenModel : IDisposable
         MonitorPrompt.state.changed += onAnyChanged;
 
         // Периодически перечитываем реестр (монитор пингует/мерит в фоне) — давности живые; не во время ручного теста.
-        reloadTimer = new Timer(_ => post(() => { if (!fullTesting && !checking) reloadServers(); }), null, 15_000, 15_000);
+        reloadTimer = new Timer(_ => this.ui(() => { if (mainTabVisible && !fullTesting && !checking) reloadServers(); }), null, 15_000, 15_000);
         // Пока прокси активен и окно на экране — подтверждаем связь ФАКТОМ каждые ~12 с (в фоне — монитор сам).
         ipTimer = new Timer(_ => post(() =>
         {
-            if (UpdateFlowController.appInForeground && ProxyState.state.value.running && !checking) refreshIp();
+            if (UpdateFlowController.appInForeground && mainTabVisible && ProxyState.state.value.running && !checking) refreshIp();
         }), null, 12_000, 12_000);
     }
 
@@ -229,11 +236,12 @@ public sealed class MainScreenModel : IDisposable
     public void reloadAll() => ui(() => { reloadSources(); reloadServers(); });
 
     // ── эффективные значения (сессионное ?: сохранённое) ──
-    private int? effPing(ServerProfile p)
+    private int? effPing(ServerProfile p) => effPing(p, ProxyState.state.value, TunnelSpeed.state.value);
+
+    /// <summary>Снимок читает proxy/tunnelSpeed ОДИН раз и передаёт сюда — сортировка, «Живые» и плашка согласованы.</summary>
+    private int? effPing(ServerProfile p, ProxyStatus proxy, TunnelSpeed.Speed ts)
     {
         var k = SubscriptionManager.serverKey(p);
-        var proxy = ProxyState.state.value;
-        var ts = TunnelSpeed.state.value;
         // АКТИВНЫЙ: живой пинг из TunnelSpeed приоритетнее сессионного (тот мог нести старый ✗ из полного теста).
         if (proxy.running && proxy.serverKey == k && ts.serverKey == k && ts.pingMs != null) return ts.pingMs;
         return pingResults.TryGetValue(k, out var v) ? v : p.pingMs;
@@ -540,6 +548,16 @@ public sealed class MainScreenModel : IDisposable
         else BlocklistStore.pauseServer(context, k, displayName(p, BlocklistStore.current()), JavaSystem.currentTimeMillis());
     });
 
+    /// <summary>Пр.147.B: нажатие на подсказку — включить протоколы, среди которых есть живые серверы.</summary>
+    public void showHiddenProtocols() => ui(() =>
+    {
+        var s = SettingsStore.current();
+        var snap = snapshot();
+        if (snap.hiddenLiveProtocols.Count == 0) return;
+        SettingsStore.update(context, s with { allowedProtocols = [.. s.allowedProtocols, .. snap.hiddenLiveProtocols] });
+        MonitorCoordinator.wake();
+    });
+
     public void dismissCrashBanner() => ui(() => { CrashReporter.markLatestSeen(); showCrashBanner = false; });
 
     public void dismissUpdateBanner() => ui(() => { UpdateStore.markDismissed(context); NotificationHelper.cancelUpdate(context); });
@@ -664,7 +682,7 @@ public sealed class MainScreenModel : IDisposable
             {
                 speedResults = new(speedResults) { [key] = m.mbps };
                 speedResultsAt = new(speedResultsAt) { [key] = JavaSystem.currentTimeMillis() };
-                remeasureStatus = m.ok ? $"результат: {m.mbps} Мбит/с" : $"НЕ ИЗМЕРЕНО — {m.reason}";
+                remeasureStatus = m.ok ? $"результат: {JavaNumbers.JavaDoubleToString(m.mbps)} Мбит/с" : $"НЕ ИЗМЕРЕНО — {m.reason}";
                 remeasuring = false;
                 reloadServers();
             });
@@ -674,6 +692,21 @@ public sealed class MainScreenModel : IDisposable
     public void clearRemeasureStatus() => ui(() => remeasureStatus = "");
 
     // ── снимок для отрисовки (тот же расчёт, что в теле BootScreen) ──
+    private object?[] lastDumpKey = [];
+
+    /// <summary>
+    /// Приборы стоп-листа (Промпт 73.C): дамп фильтра на КАЖДОЕ реальное изменение его входов (как LaunchedEffect с
+    /// ключами servers/blocklist/settings/pingResults/speedResults); гейт «Подробные логи» — внутри dump.
+    /// </summary>
+    private void dumpFilterIfChanged(AppSettings settings, Blocklist blocklist)
+    {
+        object?[] key = [servers, blocklist, settings, pingResults, speedResults];
+        if (key.Length == lastDumpKey.Length && key.Zip(lastDumpKey).All(t => ReferenceEquals(t.First, t.Second))) return;
+        lastDumpKey = key;
+        try { BlocklistLog.dump(context, servers, settings, blocklist, effPing, effSpeed, cause: "recompose"); }
+        catch (Exception e) { Log.w("MainScreenModel", "BlocklistLog.dump", e); }
+    }
+
     public MainSnapshot snapshot()
     {
         var proxy = ProxyState.state.value;
@@ -683,15 +716,17 @@ public sealed class MainScreenModel : IDisposable
         var tunnelSpeed = TunnelSpeed.state.value;
         var nowMs = JavaSystem.currentTimeMillis();
 
+        dumpFilterIfChanged(settings, blocklist);
         var notBlocked = servers.Where(it => !ServerFilter.isBlocked(it, blocklist)).ToList();
         var allowedServers = notBlocked.Where(it => ServerFilter.protocolAllowed(it, settings)).ToList();
         var pausedShownCount = allowedServers.Count(it => ServerFilter.isPaused(it, blocklist));
         var hiddenCount = servers.Count - allowedServers.Count + pausedShownCount;
-        var hiddenLiveProtocols = notBlocked
+        var hiddenLiveByProto = notBlocked
             .Where(it => !ServerFilter.isPaused(it, blocklist))
             .Where(it => !ServerFilter.protocolAllowed(it, settings))
-            .Where(it => (effPing(it) ?? -1) >= 0)
-            .Select(it => it.protocol).Distinct().ToList();
+            .Where(it => (effPing(it, proxy, tunnelSpeed) ?? -1) >= 0)
+            .ToList();
+        var hiddenLiveProtocols = hiddenLiveByProto.Select(it => it.protocol).Distinct().ToList();
 
         // ТОП по РЕАЛЬНОЙ скорости: измеренные выше непомеренных; среди измеренных — по скорости убыв.; без замера — по пингу.
         var shown = allowedServers.OrderBy(it => it, Comparer<ServerProfile>.Create((a, b) =>
@@ -700,24 +735,24 @@ public sealed class MainScreenModel : IDisposable
             bool hasA = sa > 0.0, hasB = sb > 0.0;
             if (hasA && hasB) return sb.CompareTo(sa);
             if (hasA != hasB) return hasA ? -1 : 1;
-            return (effPing(a) ?? int.MaxValue).CompareTo(effPing(b) ?? int.MaxValue);
+            return (effPing(a, proxy, tunnelSpeed) ?? int.MaxValue).CompareTo(effPing(b, proxy, tunnelSpeed) ?? int.MaxValue);
         })).ToList();   // OrderBy стабилен — как sortedWith
 
         var activeServer = servers.FirstOrDefault(it => proxy.running && proxy.serverKey != null && SubscriptionManager.serverKey(it) == proxy.serverKey);
         var discriminators = buildDiscriminators(servers, blocklist);
 
-        ServerFilter.Tier tierOf(ServerProfile p) => ServerFilter.tier(p, effPing(p), effSpeed(p), effSpeedAt(p), nowMs, settings, blocklist);
+        ServerFilter.Tier tierOf(ServerProfile p) => ServerFilter.tier(p, effPing(p, proxy, tunnelSpeed), effSpeed(p), effSpeedAt(p), nowMs, settings, blocklist);
         var activeProven = proxy.running && health.lastOkMs > 0 && health.serverKey == proxy.serverKey &&
             health.phase != TunnelHealth.Phase.RECOVERING && health.phase != TunnelHealth.Phase.NO_SERVERS;
         bool isProvenActive(ServerProfile p) => activeProven && proxy.serverKey == SubscriptionManager.serverKey(p);
         var alive = shown.Where(p => tierOf(p) == ServerFilter.Tier.LIVE || isProvenActive(p)).ToList();
         var prevMeasured = shown.Where(p => tierOf(p) == ServerFilter.Tier.PREVIOUS && !isProvenActive(p)).ToList();
 
-        ServerRowInfo row(ServerProfile p, int number)
+        ServerRowInfo row(ServerProfile p, int number, bool canBeActive = true)
         {
             var k = SubscriptionManager.serverKey(p);
-            return new ServerRowInfo(p, k, displayName(p, blocklist), proxy.running && proxy.serverKey == k, number,
-                effSpeed(p), effSpeedFull(p), speedAge(p), effPing(p), effPingAge(p),
+            return new ServerRowInfo(p, k, displayName(p, blocklist), canBeActive && proxy.running && proxy.serverKey == k, number,
+                effSpeed(p), effSpeedFull(p), speedAge(p), effPing(p, proxy, tunnelSpeed), effPingAge(p),
                 discriminators.TryGetValue(k, out var c) ? c : "", ServerFilter.isPaused(p, blocklist));
         }
 
@@ -744,7 +779,7 @@ public sealed class MainScreenModel : IDisposable
             serverNumber: alive.FindIndex(it => proxy.running && proxy.serverKey == SubscriptionManager.serverKey(it)) + 1,
             subtitle: activeServer != null ? protoNetSec(activeServer) : null,
             speedMbps: activeServer != null ? effSpeed(activeServer) : null,
-            pingMs: activeServer != null ? effPing(activeServer) : null,
+            pingMs: activeServer != null ? effPing(activeServer, proxy, tunnelSpeed) : null,
             pingAge: tunnelSpeed.serverKey == proxy.serverKey && tunnelSpeed.pingAtMs > 0L ? speedAgeTextMs(tunnelSpeed.pingAtMs) : "",
             uploadMbps: activeUploadMbps,
             directDownMbps: ts.directDownMbps, tunnelDownMbps: ts.tunnelDownMbps, tunnelUpMbps: ts.tunnelUpMbps,
@@ -758,11 +793,14 @@ public sealed class MainScreenModel : IDisposable
         return new MainSnapshot(
             status: status,
             alive: alive.Select((p, i) => row(p, i + 1)).ToList(),
-            prevMeasured: prevMeasured.Select(p => row(p, 0)).ToList(),
+            prevMeasured: prevMeasured.Select(p => row(p, 0, canBeActive: false)).ToList(),   // Kotlin: isActive = false
             all: shown.Select(p => row(p, 0)).ToList(),
             hiddenCount: hiddenCount,
             noProtocolsAllowed: settings.allowedProtocols.Count == 0 && servers.Count > 0,
-            hiddenLiveProtocols: alive.Count < 3 ? hiddenLiveProtocols : [],
+            hiddenLiveProtocols: hiddenLiveByProto.Count > 0 && alive.Count < 3 ? hiddenLiveProtocols : [],
+            hiddenLiveHint: hiddenLiveByProto.Count > 0 && alive.Count < 3
+                ? $"Есть живые серверы, скрытые фильтром протоколов ({string.Join(", ", hiddenLiveProtocols)}): {hiddenLiveByProto.Count}. Нажмите, чтобы показать их."
+                : "",
             serversEmpty: servers.Count == 0,
             sourcesEmpty: sources.Count == 0,
             fullTesting: fullTesting, refreshingSubs: refreshingSubs,

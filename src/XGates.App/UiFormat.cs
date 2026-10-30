@@ -59,8 +59,11 @@ public static class UiFormat
     public static string speedAgeText(string? ts)
     {
         if (string.IsNullOrWhiteSpace(ts)) return "";
-        // Kotlin: SimpleDateFormat("yyyy-MM-dd HH:mm") в ЛОКАЛЬНОЙ зоне.
-        if (!DateTime.TryParseExact(ts, "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var dt)) return "";
+        // Kotlin: SimpleDateFormat("yyyy-MM-dd HH:mm") в ЛОКАЛЬНОЙ зоне; parse(String) нестрогий — хвост после минут
+        // (напр. «:56») игнорирует. Повторяем: разбираем первые 16 символов.
+        var head = ts.Trim();
+        if (head.Length > 16) head = head[..16];
+        if (!DateTime.TryParseExact(head, "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var dt)) return "";
         return speedAgeTextMs(new DateTimeOffset(dt).ToUnixTimeMilliseconds());
     }
 
@@ -75,15 +78,10 @@ public static class UiFormat
     /// <summary>Число скорости: ≥10 → целое, &lt;10 → 1 знак.</summary>
     public static string numStr(double mbps) =>
         mbps >= 10 ? KotlinMath.roundToInt(mbps).ToString(CultureInfo.InvariantCulture)
-                   : (KotlinMath.roundToInt(mbps * 10) / 10.0).ToString(CultureInfo.InvariantCulture);
+                   : JavaNumbers.JavaDoubleToString(KotlinMath.roundToInt(mbps * 10) / 10.0);   // Double.toString: «5.0», не «5»
 
     /// <summary>Одна десятая, как Kotlin `(v * 10).roundToInt() / 10.0` (Double.toString: «5.0», не «5»).</summary>
-    public static string r1(double v)
-    {
-        var x = KotlinMath.roundToInt(v * 10) / 10.0;
-        var s = x.ToString(CultureInfo.InvariantCulture);
-        return s.Contains('.') || s.Contains('E') ? s : s + ".0";
-    }
+    public static string r1(double v) => JavaNumbers.JavaDoubleToString(KotlinMath.roundToInt(v * 10) / 10.0);
 
     public static string humanAgo(long ms)
     {
