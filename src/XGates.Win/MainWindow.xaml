@@ -292,6 +292,7 @@
                     <WrapPanel>
                         <Button x:Name="UpdateCheckButton" Content="Проверить обновление" Click="OnUpdateCheck" />
                         <Button x:Name="UpdateInstallButton" Content="Скачать и установить" Click="OnUpdateInstall" Visibility="Collapsed" />
+                        <Button x:Name="UpdateCancelButton" Content="Отменить" Click="OnUpdateCancel" Visibility="Collapsed" />
                         <Button Content="Подробности" Click="OnUpdateDetails" />
                     </WrapPanel>
                     <TextBlock x:Name="UpdatePhase" TextWrapping="Wrap" Margin="0,4" FontWeight="Bold" />

@@ -637,7 +637,9 @@ public partial class MainWindow : Window
         UpdateSummary.Text = rec.checkedAtMs > 0
             ? $"{rec.summary} · {DateTimeOffset.FromUnixTimeMilliseconds(rec.checkedAtMs).ToLocalTime():dd.MM.yyyy HH:mm}"
             : "Ещё не проверялось";
-        UpdateInstallButton.Visibility = V(UpdateStore.live.value is UpdateCheckResult.Available);
+        var downloading = UpdateFlowController.phase.value is UpdateFlowController.Phase.Downloading;
+        UpdateInstallButton.Visibility = V(UpdateStore.live.value is UpdateCheckResult.Available && !downloading);
+        UpdateCancelButton.Visibility = V(downloading);
         UpdatePhase.Text = UpdateFlowController.phase.value switch
         {
             UpdateFlowController.Phase.Checking => "Проверяю обновление…",
@@ -715,6 +717,7 @@ public partial class MainWindow : Window
         }, "update-manual");
     }
     private void OnUpdateInstall(object sender, RoutedEventArgs e) => UpdateFlowController.oneTap(ctx);
+    private void OnUpdateCancel(object sender, RoutedEventArgs e) => UpdateFlowController.cancel();
     private void OnUpdateDetails(object sender, RoutedEventArgs e) =>
         MessageBox.Show(this, UpdateStore.record.value.details.Length > 0 ? UpdateStore.record.value.details : "Подробностей пока нет — проверка не выполнялась.", "Проверка обновления");
 
