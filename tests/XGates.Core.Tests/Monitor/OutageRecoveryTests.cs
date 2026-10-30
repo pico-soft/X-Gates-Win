@@ -112,4 +112,46 @@ public sealed class OutageRecoveryTests : IDisposable
         Assert.True(ProxyState.state.value.running);
         Assert.Contains(MonitorLog.state.value, e => e.kind == "switch");
     }
+
+    [Fact]
+    public void All_servers_dead_says_so_and_offers_disabled_sources()
+    {
+        int a = net.StartVlessServer();
+        SubscriptionManager.init(ctx);
+        SubscriptionManager.addLocalFromBody(ctx, $"vless://{LocalTestNet.Uuid}@127.0.0.1:{a}?type=tcp&security=none#A", "local");
+        // Выключенный источник с серверами — кандидат для предложения «включить» (сами не включаем).
+        var (offId, _) = SubscriptionManager.addLocalFromBody(ctx, $"vless://{LocalTestNet.Uuid}@127.0.0.1:{LocalTestNet.FreePort()}?type=tcp&security=none#OFF", "запасной");
+        SubscriptionManager.setEnabled(ctx, offId, false);
+        var srvA = SubscriptionManager.allServers(ctx).Single();
+        var keyA = SubscriptionManager.serverKey(srvA);
+        SubscriptionManager.applyPingResults(ctx, new Dictionary<string, int> { [keyA] = 5 });
+        var shown = new List<NotificationHelper.Kind>();
+        var savedSink = NotificationHelper.Sink;
+        NotificationHelper.Sink = new Sink(shown);
+        MonitorPrompt.clear(); MonitorPrompt.resetDeclined();
+        try
+        {
+            XrayProxyService.start(ctx, XrayConfigBuilder.build(srvA), "A", keyA);
+            Assert.True(WaitUntil(() => TunnelHealth.isConfirmedFor(keyA, JavaSystem.currentTimeMillis(), 60_000), 30_000, wake: true), $"{TunnelHealth.snapshot()}");
+
+            net.StopVlessServer(a);   // единственный включённый сервер умер
+            Assert.True(WaitUntil(() => TunnelHealth.snapshot().phase == TunnelHealth.Phase.NO_SERVERS, 120_000, wake: true),
+                $"не дошли до «рабочих серверов нет»: {TunnelHealth.snapshot()} · журнал: {string.Join(" | ", MonitorLog.state.value.TakeLast(5).Select(e => e.text))}");
+            Assert.True(WaitUntil(() => MonitorPrompt.state.value is { sources: 1, servers: 1 }, 30_000, wake: true), $"предложение не появилось: {MonitorPrompt.state.value}");
+            lock (shown)
+            {
+                Assert.Contains(NotificationHelper.Kind.NO_SERVERS, shown);
+                Assert.Contains(NotificationHelper.Kind.ENABLE_SOURCES, shown);
+            }
+            Assert.False(SubscriptionManager.sources(ctx).Single(x => x.id == offId).enabled);   // сами НЕ включили
+            Assert.True(ProxyState.state.value.running);   // сервис жив — ждёт, связь не «выключена» молча
+        }
+        finally { NotificationHelper.Sink = savedSink; MonitorPrompt.clear(); MonitorPrompt.resetDeclined(); }
+    }
+
+    private sealed class Sink(List<NotificationHelper.Kind> shown) : NotificationHelper.INotificationSink
+    {
+        public void show(NotificationHelper.Kind kind, string title, string text) { lock (shown) shown.Add(kind); }
+        public void cancel(NotificationHelper.Kind kind) { }
+    }
 }
