@@ -59,6 +59,7 @@ public partial class App : Application
         tray.exitRequested += exitApp;
         tray.balloonClicked += kind => { showWindow(); if (kind == NotificationHelper.Kind.UPDATE) window?.openSettings(); };
         UpdateFlowController.exitApp = () => Dispatcher.BeginInvoke(exitApp);
+        UpdateFlowController.launchInstaller = WinInstaller.start;   // установить и открыть новую версию
 
         main = new MainScreenModel(ctx, ui);
         subs = new SubscriptionsModel(ctx, ui);

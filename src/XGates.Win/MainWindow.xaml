@@ -125,7 +125,8 @@
                             <TextBlock x:Name="HiddenNote" Foreground="{StaticResource Gray}" FontSize="12" Margin="4,0" TextWrapping="Wrap" />
                             <TextBlock x:Name="NoProtocolsNote" Foreground="#C62828" FontSize="12" Margin="4,0" TextWrapping="Wrap" Visibility="Collapsed"
                                        Text="Все протоколы выключены в настройках — список пуст. Включите хотя бы один протокол." />
-                            <TextBlock x:Name="HiddenLiveNote" Foreground="#E8710A" FontSize="12" Margin="4,0" TextWrapping="Wrap" Visibility="Collapsed" />
+                            <TextBlock x:Name="HiddenLiveNote" Foreground="#E8710A" FontSize="12" FontWeight="Bold" Margin="4,0" TextWrapping="Wrap" Visibility="Collapsed"
+                                       Cursor="Hand" MouseLeftButtonUp="OnShowHiddenProtocols" />
                             <ItemsControl x:Name="LiveList" ItemTemplate="{StaticResource ServerRow}" />
                             <TextBlock x:Name="LiveEmpty" Foreground="{StaticResource Gray}" Margin="4,6" TextWrapping="Wrap" />
                         </StackPanel>

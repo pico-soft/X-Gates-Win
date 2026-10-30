@@ -66,7 +66,13 @@ public partial class MainWindow : Window
         WinSettingsStore.state.changed += _ => dirty = true;
         BlocklistStore.state.changed += _ => Dispatcher.BeginInvoke(() => { if (Tabs.SelectedItem == SettingsTab) renderBlocklist(); });
         redraw.Start();
-        Tabs.SelectionChanged += (_, e) => { if (e.Source == Tabs) { dirty = true; if (Tabs.SelectedItem == SettingsTab) loadSettings(); } };
+        Tabs.SelectionChanged += (_, e) =>
+        {
+            if (e.Source != Tabs) return;
+            dirty = true;
+            main.mainTabVisible = Tabs.SelectedIndex == 0;
+            if (Tabs.SelectedItem == SettingsTab) loadSettings();
+        };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) minimized?.Invoke(); else restored?.Invoke(); };
         LiveList.ItemsSource = liveRows; PrevList.ItemsSource = prevRows; AllList.ItemsSource = allRows;
         SourcesList.ItemsSource = sourceRows;
@@ -113,9 +119,10 @@ public partial class MainWindow : Window
             promptShowing = true;
             Dispatcher.BeginInvoke(() =>
             {
-                var r = MessageBox.Show(this, $"Все включённые серверы перебраны — живых нет. Есть {ep.sources} выключенных источников (~{ep.servers} серверов). Включить их и обновить?",
-                    "Нет живых серверов", MessageBoxButton.YesNo, MessageBoxImage.Question);
-                if (r == MessageBoxResult.Yes) main.acceptEnablePrompt(); else main.declineEnablePrompt();
+                var yes = Ask.choose(this, "Нет живых серверов",
+                    $"Все включённые серверы перебраны — живых нет. Есть {ep.sources} выключенных источников (~{ep.servers} серверов). Включить их и обновить?",
+                    "Включить", "Не сейчас");
+                if (yes) main.acceptEnablePrompt(); else main.declineEnablePrompt();
                 promptShowing = false;
             });
         }
@@ -201,9 +208,8 @@ public partial class MainWindow : Window
         HiddenNote.Text = s.hiddenCount > 0 ? $"скрыто настройками и стоп-листом: {s.hiddenCount}" : "";
         HiddenNote.Visibility = V(s.hiddenCount > 0);
         NoProtocolsNote.Visibility = V(s.noProtocolsAllowed);
-        HiddenLiveNote.Visibility = V(s.hiddenLiveProtocols.Count > 0);
-        HiddenLiveNote.Text = s.hiddenLiveProtocols.Count > 0
-            ? $"Живые серверы есть среди скрытых протоколов: {string.Join(", ", s.hiddenLiveProtocols)} — включите их в «Настройки → Протоколы»." : "";
+        HiddenLiveNote.Visibility = V(s.hiddenLiveHint.Length > 0);
+        HiddenLiveNote.Text = s.hiddenLiveHint;
         sync(liveRows, s.alive);
         LiveEmpty.Text = s.serversEmpty ? "Список пуст — обновите подписку." : "Запусти тест кнопкой «Самый быстрый».";
         LiveEmpty.Visibility = V(s.alive.Count == 0);
@@ -274,6 +280,8 @@ public partial class MainWindow : Window
 
     // ═════════════ Главная: действия ═════════════
     private static RowView? rowOf(object sender) => (sender as FrameworkElement)?.Tag as RowView;
+    private void OnShowHiddenProtocols(object sender, MouseButtonEventArgs e) => main.showHiddenProtocols();
+
     private void OnRowDetails(object sender, MouseButtonEventArgs e)
     {
         if (rowOf(sender) is { } r) new ServerDetailsWindow(this, main, r.Info.profile).ShowDialog();
