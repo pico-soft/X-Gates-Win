@@ -97,6 +97,33 @@ public static class NetworkMonitor
     // Не const: тест обрыва туннеля укорачивает grace, чтобы проверка восстановления шла секунды, а не минуты.
     internal static long LIVENESS_GRACE_MS = 90_000L;
     internal static long GRACE_RECHECK_MS = 25_000L;      // в grace перепроверяем чаще обычного цикла
+
+    // ── ШНУР: проверка чаще (решение Elyor 2026-10-30, отход от Android) ──
+    // Редкая проверка (раз в connectionCheckIntervalSec + grace 90 с ≈ 2–2,5 мин до переключения) — ради БАТАРЕИ. На
+    // шнуре батарея не тратится: проверяем раз в 10 с, обрыв объявляем после 30 с тишины (перепроверка 10 с) →
+    // переключение ≈ 40–50 с. Цена проверки без трафика — старт временного xray (≈ 0,03–0,04 с CPU) и ~3 КБ. Экономия
+    // трафика / мобильная сеть — как на батарее (там важнее трафик). Тесты, укорачивающие grace, по-прежнему действуют (min).
+    internal const long AC_CHECK_MS = 10_000L;
+    internal const long AC_LIVENESS_GRACE_MS = 30_000L;
+    internal const long AC_GRACE_RECHECK_MS = 10_000L;
+
+    /// <summary>Частые проверки: шнур (стационарный ПК — всегда), не экономия трафика и не мобильная сеть.</summary>
+    public static bool fastChecksOnAc(AppSettings s)
+    {
+        bool charging;
+        try { charging = Device.isCharging(); } catch (Exception) { charging = false; }
+        return charging && !s.trafficSaveMode && !EconomyNet.lastKnownMobile;
+    }
+
+    /// <summary>Интервал проверки ЗДОРОВОЙ связи (до лестницы «экран выключен»): на батарее — ползунок, на шнуре — 10 с.</summary>
+    public static long healthyCheckMs(AppSettings s)
+    {
+        var b = s.connectionCheckIntervalSec.coerceAtLeast(15) * 1000L;
+        return fastChecksOnAc(s) ? Math.Min(b, AC_CHECK_MS) : b;
+    }
+
+    internal static long graceMs(AppSettings s) => fastChecksOnAc(s) ? Math.Min(LIVENESS_GRACE_MS, AC_LIVENESS_GRACE_MS) : LIVENESS_GRACE_MS;
+    internal static long graceRecheckMs(AppSettings s) => fastChecksOnAc(s) ? Math.Min(GRACE_RECHECK_MS, AC_GRACE_RECHECK_MS) : GRACE_RECHECK_MS;
     private const long IP_REFRESH_MS = 150_000L;          // внешний IP тянем реже — ТОЛЬКО для показа на плашке
 
     // ── АДАПТИВНЫЙ ЗАМЕР ЖИВОСТИ (снижение трафика/батареи; ТЗ Elyor поверх Пр.150) ──
@@ -274,12 +301,12 @@ public static class NetworkMonitor
                 long waitMs;
                 if (ph == TunnelHealth.Phase.NO_INTERNET) waitMs = noNetBackoffMs.coerceAtLeast(NO_NET_BACKOFF_START_MS);   // Нет интернета — переспрашиваем по экспоненте
                 else if (ph is TunnelHealth.Phase.RECOVERING or TunnelHealth.Phase.NO_SERVERS) waitMs = s.monitorProblemIntervalSec.coerceAtLeast(15) * 1000L;
-                else if (graceRecheck) waitMs = GRACE_RECHECK_MS;   // Пр.150: в grace-окне перепроверяем ЧАЩЕ
+                else if (graceRecheck) waitMs = graceRecheckMs(s);   // Пр.150: в grace-окне перепроверяем ЧАЩЕ (на шнуре — ещё чаще)
                 else
                 {
                     // Q2 Elyor + лестница: здоровая связь + экран ВЫКЛ на батарее → будим реже (5→10→15 мин по времени
                     // без экрана; ≤5% заряда → 30 мин). На ШНУРЕ/экран вкл — обычный интервал (топ свежий, батарея цела).
-                    var @base = s.connectionCheckIntervalSec.coerceAtLeast(15) * 1000L;
+                    var @base = healthyCheckMs(s);   // на шнуре — 10 с (решение Elyor)
                     waitMs = idleIntervalMs(app, @base, screenOffSinceMs);
                 }
                 // ── СОН: отпустить CPU, ждать таймер ИЛИ событие (экран/сеть/пробуждение ПК). На Windows будильник не
@@ -309,7 +336,7 @@ public static class NetworkMonitor
                 // цикл НЕ ЧАЩЕ эффективного интервала. Проблемные фазы и grace НЕ дебаунсим — реагируем немедленно.
                 if (ph == TunnelHealth.Phase.OK && !graceRecheck)
                 {
-                    var everyMs = idleIntervalMs(app, cur.connectionCheckIntervalSec.coerceAtLeast(15) * 1000L, screenOffSinceMs);
+                    var everyMs = idleIntervalMs(app, healthyCheckMs(cur), screenOffSinceMs);
                     if (now() - lastFullCycleMs < everyMs) continue;   // паразитное пробуждение — не тратим пинг/IP/батарею
                 }
                 lastFullCycleMs = now();
@@ -601,7 +628,7 @@ public static class NetworkMonitor
 
                 // Пр.150 GRACE: живость была недавно (≤ LIVENESS_GRACE_MS) → НЕ краснеем, держим прежнюю связь, но
                 // перепроверяем ЧАЩЕ (graceRecheck). Один провал (частый Read-timeout на живом сервере) красным НЕ мигает.
-                if (now() - lastLiveConfirmedMs <= LIVENESS_GRACE_MS)
+                if (now() - lastLiveConfirmedMs <= graceMs(cur))
                 {
                     graceRecheck = true;
                     MonitorStatus.update(true, "проверяю связь…", now(), cycles);
