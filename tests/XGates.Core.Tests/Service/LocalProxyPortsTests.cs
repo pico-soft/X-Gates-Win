@@ -76,6 +76,12 @@ public sealed class LocalProxyPortsTests : IDisposable
         Assert.Equal(10815, XrayConfig.SOCKS_PORT);
     }
 
+    private static bool Accepts(int port)
+    {
+        try { using var c = new TcpClient(); return c.ConnectAsync(IPAddress.Loopback, port).Wait(3000) && c.Connected; }
+        catch (Exception) { return false; }
+    }
+
     private static bool WaitUntil(Func<bool> cond, int ms)
     {
         var end = Environment.TickCount64 + ms;
@@ -109,7 +115,11 @@ public sealed class LocalProxyPortsTests : IDisposable
         // Порт освободили → тот же старт поднимает прокси на НАСТРОЕННЫХ портах, трафик идёт.
         XrayProxyService.start(ctx, XrayConfigBuilder.build(p), "srv", key);
         Assert.True(WaitUntil(() => ProxyState.state.value.running, 10_000), ProxyState.state.value.message);
-        Assert.True(ProxyState.state.value.socksOk && ProxyState.state.value.httpOk);
+        // Флаги socksOk/httpOk сервис ставит ОДНОЙ пробой 500 мс сразу после старта (как Android); на нагруженном
+        // Windows-раннере она однажды не успела (прогон 41190901945), хотя порты слушали. Окно Windows эти флаги не
+        // показывает → проверяем сами порты (а трафик ниже — что они рабочие).
+        Assert.True(WaitUntil(() => Accepts(socks) && Accepts(http), 10_000),
+            $"порты не слушают: socks={Accepts(socks)} http={Accepts(http)} (флаги сервиса: {ProxyState.state.value.socksOk}/{ProxyState.state.value.httpOk})");
         // Тело непустое: ответ БЕЗ тела (204/200 с Content-Length 0) через HTTP-вход xray в режиме пересылки (не CONNECT)
         // на этом стенде не доходит — см. docs/decisions.md, «Факты xray»; CONNECT и SOCKS такие ответы пропускают.
         using (var c = new HttpClient(new SocketsHttpHandler { Proxy = new WebProxy($"http://127.0.0.1:{http}"), UseProxy = true }) { Timeout = TimeSpan.FromSeconds(15) })
