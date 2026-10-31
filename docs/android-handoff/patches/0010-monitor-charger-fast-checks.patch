@@ -1,0 +1,179 @@
+From aee5b75c25b3d9cc373045b25d103b8e1e69c240 Mon Sep 17 00:00:00 2001
+From: PICO-SOFT <pico.soft.github@gmail.com>
+Date: Sat, 31 Oct 2026 08:27:13 +0000
+Subject: [PATCH 10/11] =?UTF-8?q?feat(monitor):=20=D0=BD=D0=B0=20=D0=B7?=
+ =?UTF-8?q?=D0=B0=D1=80=D1=8F=D0=B4=D0=BA=D0=B5=20=D0=BF=D0=BE=20Wi-Fi=20?=
+ =?UTF-8?q?=D0=BF=D1=80=D0=BE=D0=B2=D0=B5=D1=80=D0=BA=D0=B0=20=D1=81=D0=B2?=
+ =?UTF-8?q?=D1=8F=D0=B7=D0=B8=20=D1=80=D0=B0=D0=B7=20=D0=B2=2010=20=D1=81?=
+ =?UTF-8?q?=20=D0=B8=20=D0=BE=D0=B1=D1=80=D1=8B=D0=B2=20=D0=BF=D0=BE=D1=81?=
+ =?UTF-8?q?=D0=BB=D0=B5=2030=20=D1=81=20=D1=82=D0=B8=D1=88=D0=B8=D0=BD?=
+ =?UTF-8?q?=D1=8B=20=E2=80=94=20=D0=BF=D0=B5=D1=80=D0=B5=D0=BA=D0=BB=D1=8E?=
+ =?UTF-8?q?=D1=87=D0=B5=D0=BD=D0=B8=D0=B5=20~35=20=D1=81=20=D0=B2=D0=BC?=
+ =?UTF-8?q?=D0=B5=D1=81=D1=82=D0=BE=202=E2=80=932,5=20=D0=BC=D0=B8=D0=BD?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Решение Elyor 2026-10-31 (то же, что в Windows-версии 2026-10-30): редкая проверка (ползунок, по умолчанию 60 с +
+grace 90 с) — только на батарее; на зарядке батарея не тратится — проверяем как можно чаще, лишь бы не нагружать
+процессор. На зарядке (isCharging — и при 100%, по EXTRA_PLUGGED), не в экономии трафика и не на мобильной сети:
+здоровая связь — раз в 10 с, grace 30 с с перепроверкой 10 с. Экономия трафика и мобильная сеть — как на батарее
+(там важнее трафик). Лестница «экран выключен» на зарядке и раньше не действовала. «Признак жизни» показывает
+настоящий интервал («каждые 10 с (на зарядке)»); ползунок подписан «на батарее».
+
+Проверено (на копии Android, сторона Windows-КК): ChargerChecksTest (батарея 60/90/25 с, зарядка по Wi-Fi 10/30/10 с,
+ползунок 15 мин на зарядке → 10 с, экономия и мобильная — как батарея); testDebugUnitTest 40/40; assembleDebug.
+В Windows-версии то же правило: настоящий обрыв → переключение за 34,0 и 33,8 с.
+Не проверено: на телефоне — время переключения на зарядке, нагрев и расход за ночь на зарядке.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../picosoft/xrayproxydroid/MainActivity.kt   |  8 ++--
+ .../xrayproxydroid/monitor/NetworkMonitor.kt  | 31 ++++++++++++--
+ .../xrayproxydroid/ChargerChecksTest.kt       | 41 +++++++++++++++++++
+ 3 files changed, 73 insertions(+), 7 deletions(-)
+ create mode 100644 app/src/test/java/com/picosoft/xrayproxydroid/ChargerChecksTest.kt
+
+diff --git a/app/src/main/java/com/picosoft/xrayproxydroid/MainActivity.kt b/app/src/main/java/com/picosoft/xrayproxydroid/MainActivity.kt
+index 60a642d..16c094c 100644
+--- a/app/src/main/java/com/picosoft/xrayproxydroid/MainActivity.kt
++++ b/app/src/main/java/com/picosoft/xrayproxydroid/MainActivity.kt
+@@ -3053,9 +3053,11 @@ private fun MonitorSection(
+             LaunchedEffect(Unit) { while (true) { uiNow = System.currentTimeMillis(); delay(1000) } }
+             val t = if (heartbeat.lastCheckMs > 0) monitorTimeFmt.format(Date(heartbeat.lastCheckMs)) else "—"
+             val ago = if (heartbeat.lastCheckMs > 0) "${((uiNow - heartbeat.lastCheckMs) / 1000).coerceAtLeast(0)} с назад" else "—"
+-            val interval = settings.connectionCheckIntervalSec.coerceAtLeast(15)
++            val ctx = LocalContext.current
++            val interval = NetworkMonitor.healthyCheckMs(ctx, settings) / 1000   // на зарядке — чаще (решение Elyor)
++            val power = if (NetworkMonitor.fastChecksOnCharger(ctx, settings)) " (на зарядке)" else ""
+             Text(
+-                "● Проверка связи каждые $interval с · последняя: $t ($ago) · циклов: ${heartbeat.cycles} · ${heartbeat.state}",
++                "● Проверка связи каждые $interval с$power · последняя: $t ($ago) · циклов: ${heartbeat.cycles} · ${heartbeat.state}",
+                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary,
+             )
+         }
+@@ -3234,7 +3236,7 @@ private fun OptimizeChecksBlock(settings: AppSettings, onChange: (AppSettings) -
+ 
+     // — Проверки живости (ОБЩИЕ для обоих режимов, Пр.127: на проверках не экономим никогда) —
+     Spacer(Modifier.height(4.dp))
+-    TickSlider("Проверка связи (оба режима)", CHK_LABELS, nearestIndex(CHK_SECS, settings.connectionCheckIntervalSec)) { i ->
++    TickSlider("Проверка связи на батарее (на зарядке по Wi-Fi — каждые 10 с)", CHK_LABELS, nearestIndex(CHK_SECS, settings.connectionCheckIntervalSec)) { i ->
+         onChange(settings.copy(connectionCheckIntervalSec = CHK_SECS[i]))
+     }
+     val chkSec = CHK_SECS[nearestIndex(CHK_SECS, settings.connectionCheckIntervalSec)].coerceAtLeast(15)
+diff --git a/app/src/main/java/com/picosoft/xrayproxydroid/monitor/NetworkMonitor.kt b/app/src/main/java/com/picosoft/xrayproxydroid/monitor/NetworkMonitor.kt
+index de3c35b..7b1f418 100644
+--- a/app/src/main/java/com/picosoft/xrayproxydroid/monitor/NetworkMonitor.kt
++++ b/app/src/main/java/com/picosoft/xrayproxydroid/monitor/NetworkMonitor.kt
+@@ -112,6 +112,29 @@ object NetworkMonitor {
+     // Глючно-живой сервер (редкий успех в окне) → зелёная держится; реально мёртвый (молчит всё окно) → красная.
+     private const val LIVENESS_GRACE_MS = 90_000L
+     private const val GRACE_RECHECK_MS = 25_000L        // в grace перепроверяем чаще обычного цикла
++
++    // ── ЗАРЯДКА: проверка чаще (решение Elyor 2026-10-31, как в Windows-версии) ──
++    // Редкая проверка (раз в connectionCheckIntervalSec + grace 90 с ≈ 2–2,5 мин до переключения) — ради БАТАРЕИ. На
++    // зарядке батарея не тратится: проверяем раз в 10 с, обрыв объявляем после 30 с тишины (перепроверка 10 с) →
++    // переключение ≈ 35 с. Цена проверки без трафика — пинг через temp-инстанс и ~3 КБ; с трафиком пользователя пинга
++    // нет. Экономия трафика / мобильная сеть — как на батарее (там важнее трафик).
++    internal const val AC_CHECK_MS = 10_000L
++    internal const val AC_LIVENESS_GRACE_MS = 30_000L
++    internal const val AC_GRACE_RECHECK_MS = 10_000L
++
++    /** Частые проверки: зарядка (см. [isCharging] — и при 100%), не экономия трафика и не мобильная сеть. */
++    fun fastChecksOnCharger(app: Context, s: AppSettings): Boolean = fastChecks(isCharging(app), s, EconomyNet.lastKnownMobile)
++    internal fun fastChecks(charging: Boolean, s: AppSettings, mobile: Boolean): Boolean = charging && !s.trafficSaveMode && !mobile
++
++    /** Интервал проверки ЗДОРОВОЙ связи (до лестницы «экран выключен»): на батарее — ползунок, на зарядке — 10 с. */
++    fun healthyCheckMs(app: Context, s: AppSettings): Long = healthyCheckMs(s, fastChecksOnCharger(app, s))
++    internal fun healthyCheckMs(s: AppSettings, fast: Boolean): Long {
++        val b = s.connectionCheckIntervalSec.coerceAtLeast(15) * 1000L
++        return if (fast) minOf(b, AC_CHECK_MS) else b
++    }
++
++    internal fun graceMs(fast: Boolean): Long = if (fast) minOf(LIVENESS_GRACE_MS, AC_LIVENESS_GRACE_MS) else LIVENESS_GRACE_MS
++    internal fun graceRecheckMs(fast: Boolean): Long = if (fast) minOf(GRACE_RECHECK_MS, AC_GRACE_RECHECK_MS) else GRACE_RECHECK_MS
+     private const val IP_REFRESH_MS = 150_000L          // внешний IP тянем реже — ТОЛЬКО для показа на плашке
+ 
+     // ── АДАПТИВНЫЙ ЗАМЕР ЖИВОСТИ (снижение трафика/батареи; ТЗ Elyor поверх Пр.150) ──
+@@ -257,11 +280,11 @@ object NetworkMonitor {
+                 // Восстановление туннеля / нет серверов — чаще (быстрее вернуть связь).
+                 ph == TunnelHealth.Phase.RECOVERING || ph == TunnelHealth.Phase.NO_SERVERS -> s.monitorProblemIntervalSec.coerceAtLeast(15) * 1000L
+                 // Пр.150: в grace-окне (проверка не прошла, но связь была недавно) перепроверяем ЧАЩЕ.
+-                graceRecheck -> GRACE_RECHECK_MS
++                graceRecheck -> graceRecheckMs(fastChecksOnCharger(app, s))   // на зарядке — ещё чаще
+                 else -> {
+                     // Q2 Elyor + лестница: здоровая связь + экран ВЫКЛ на батарее → будим реже (5→10→15 мин по времени
+                     // без экрана; ≤5% заряда → 30 мин). На ШНУРЕ/экран вкл — обычный интервал (топ свежий, батарея цела).
+-                    val base = s.connectionCheckIntervalSec.coerceAtLeast(15) * 1000L
++                    val base = healthyCheckMs(app, s)   // на зарядке — 10 с (решение Elyor)
+                     idleIntervalMs(app, base, screenOffSinceMs)
+                 }
+             }
+@@ -297,7 +320,7 @@ object NetworkMonitor {
+             if (ph == TunnelHealth.Phase.OK && !graceRecheck) {
+                 // Дорогую работу цикла делаем НЕ ЧАЩЕ эффективного интервала (та же лестница, что и у сна): на шнуре/
+                 // экран вкл — обычный; на батарее+экран выкл — 5→10→15 мин; ≤5% — 30 мин. Дешёвое пробуждение спит дальше.
+-                val everyMs = idleIntervalMs(app, cur.connectionCheckIntervalSec.coerceAtLeast(15) * 1000L, screenOffSinceMs)
++                val everyMs = idleIntervalMs(app, healthyCheckMs(app, cur), screenOffSinceMs)
+                 if (now() - lastFullCycleMs < everyMs) continue   // паразитное пробуждение — не тратим пинг/IP/батарею
+             }
+             lastFullCycleMs = now()
+@@ -569,7 +592,7 @@ object NetworkMonitor {
+ 
+             // Пр.150 GRACE: живость была недавно (≤ LIVENESS_GRACE_MS) → НЕ краснеем, держим прежнюю связь, но
+             // перепроверяем ЧАЩЕ (graceRecheck). Один провал (частый Read-timeout на живом сервере) красным НЕ мигает.
+-            if (now() - lastLiveConfirmedMs <= LIVENESS_GRACE_MS) {
++            if (now() - lastLiveConfirmedMs <= graceMs(fastChecksOnCharger(app, cur))) {
+                 graceRecheck = true
+                 MonitorStatus.update(true, "проверяю связь…", now(), cycles)
+                 continue
+diff --git a/app/src/test/java/com/picosoft/xrayproxydroid/ChargerChecksTest.kt b/app/src/test/java/com/picosoft/xrayproxydroid/ChargerChecksTest.kt
+new file mode 100644
+index 0000000..d8bf27e
+--- /dev/null
++++ b/app/src/test/java/com/picosoft/xrayproxydroid/ChargerChecksTest.kt
+@@ -0,0 +1,41 @@
++package com.picosoft.xrayproxydroid
++
++import com.picosoft.xrayproxydroid.monitor.NetworkMonitor
++import com.picosoft.xrayproxydroid.settings.AppSettings
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++/**
++ * Решение Elyor 2026-10-31 (как в Windows-версии): редкая проверка связи — только на батарее. На зарядке по Wi-Fi без
++ * экономии трафика — проверка раз в 10 с, обрыв после 30 с тишины (перепроверка 10 с) → переключение ≈ 35 с вместо
++ * 2–2,5 мин. Экономия трафика и мобильная сеть — как на батарее.
++ */
++class ChargerChecksTest {
++
++    private val s = AppSettings(connectionCheckIntervalSec = 60)
++
++    @Test fun battery_keeps_slider_and_long_grace() {
++        val fast = NetworkMonitor.fastChecks(charging = false, s = s, mobile = false)
++        assertFalse(fast)
++        assertEquals(60_000L, NetworkMonitor.healthyCheckMs(s, fast))
++        assertEquals(90_000L, NetworkMonitor.graceMs(fast))
++        assertEquals(25_000L, NetworkMonitor.graceRecheckMs(fast))
++    }
++
++    @Test fun charger_on_wifi_checks_every_10s_and_declares_outage_after_30s() {
++        val fast = NetworkMonitor.fastChecks(charging = true, s = s, mobile = false)
++        assertTrue(fast)
++        assertEquals(10_000L, NetworkMonitor.healthyCheckMs(s, fast))
++        assertEquals(30_000L, NetworkMonitor.graceMs(fast))
++        assertEquals(10_000L, NetworkMonitor.graceRecheckMs(fast))
++        // Ползунок на зарядке не замедляет: даже 15 мин → 10 с.
++        assertEquals(10_000L, NetworkMonitor.healthyCheckMs(AppSettings(connectionCheckIntervalSec = 900), fast))
++    }
++
++    @Test fun charger_with_traffic_save_or_mobile_stays_as_on_battery() {
++        assertFalse("экономия трафика", NetworkMonitor.fastChecks(charging = true, s = s.copy(trafficSaveMode = true), mobile = false))
++        assertFalse("мобильная сеть", NetworkMonitor.fastChecks(charging = true, s = s, mobile = true))
++    }
++}
+-- 
+2.43.0
+
