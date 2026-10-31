@@ -79,4 +79,47 @@ public sealed class TlsLinkIntegrationTests : IDisposable
         Assert.Contains("\"verifyPeerCertByName\": \"example.com\"", XrayConfigBuilder.build(p));
         Assert.False(Tunnel(p));   // имя совпало, но цепочка самоподписанная — доверия нет
     }
+
+    [Fact]
+    public void Xhttp_extra_from_link_reaches_core()
+    {
+        // Сервер требует нестандартный паддинг: без extra ядро клиента шлёт 100–1000 и получает отказ.
+        int server = net.StartVlessTlsServer(cert, new JsonObject { ["path"] = "/x", ["xPaddingBytes"] = "1500-2000" });
+        var q = $"type=xhttp&security=tls&sni=example.com&path=%2Fx&pcs={cert.Sha256Hex}";
+        Assert.False(Tunnel(Vless(server, q)));
+        var extra = Uri.EscapeDataString("""{"xPaddingBytes":"1500-2000","xmux":{"maxConcurrency":"4-8"}}""");
+        Assert.True(Tunnel(Vless(server, q + "&extra=" + extra)));
+    }
+
+    [Fact]
+    public void Xhttp_download_settings_from_link_carry_traffic()
+    {
+        int server = net.StartVlessTlsServer(cert, new JsonObject { ["path"] = "/x" });
+        var extra = Uri.EscapeDataString(new JsonObject
+        {
+            ["downloadSettings"] = new JsonObject
+            {
+                ["address"] = "127.0.0.1", ["port"] = server, ["network"] = "xhttp", ["security"] = "tls",
+                ["tlsSettings"] = new JsonObject { ["serverName"] = "example.com", ["pinnedPeerCertSha256"] = cert.Sha256Hex },
+                ["xhttpSettings"] = new JsonObject { ["path"] = "/x" },
+            },
+        }.ToJsonString());
+        var p = Vless(server, $"type=xhttp&mode=packet-up&security=tls&sni=example.com&path=%2Fx&pcs={cert.Sha256Hex}&extra={extra}");
+        Assert.Contains("downloadSettings", XrayConfigBuilder.build(p));
+        Assert.True(Tunnel(p));
+    }
+
+    [Fact]
+    public void Xhttp_extra_from_json_config_reaches_core()
+    {
+        int server = net.StartVlessTlsServer(cert, new JsonObject { ["path"] = "/x", ["xPaddingBytes"] = "1500-2000" });
+        var body = $$"""
+            [{ "remarks": "json", "outbounds": [{ "protocol": "vless",
+              "settings": { "vnext": [{ "address": "127.0.0.1", "port": {{server}}, "users": [{ "id": "{{LocalTestNet.Uuid}}", "encryption": "none" }] }] },
+              "streamSettings": { "network": "xhttp", "security": "tls",
+                "tlsSettings": { "serverName": "example.com", "pinnedPeerCertSha256": "{{cert.Sha256Hex}}" },
+                "xhttpSettings": { "path": "/x", "xPaddingBytes": "1500-2000" } } }] }]
+            """;
+        Assert.True(Tunnel(JsonConfigParser.parse(body).Single()));
+    }
 }

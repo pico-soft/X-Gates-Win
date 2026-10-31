@@ -207,6 +207,7 @@ public static class XrayConfigBuilder
             "\"host\": " + j(host),
         };
         if (p.mode.IsNotBlank()) fields.Add("\"mode\": " + j(p.mode!));
+        if (XhttpExtra.forConfig(p.xhttpExtra, p.mode) is { } extra) fields.Add("\"extra\": " + extra);
         return "{ " + string.Join(", ", fields) + " }";
     }
 

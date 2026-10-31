@@ -123,7 +123,7 @@ public static class JsonConfigParser
         var shortId = reality?.optString("shortId").IfBlankNull();
         var spiderX = reality?.optString("spiderX").IfBlankNull();
 
-        string? path = null, hostHeader = null, serviceName = null, headerType = null, mode = null, seed = null;
+        string? path = null, hostHeader = null, serviceName = null, headerType = null, mode = null, seed = null, xhttpExtra = null;
         switch (network)
         {
             case "ws":
@@ -145,6 +145,8 @@ public static class JsonConfigParser
                 {
                     path = x.optString("path").IfBlankNull(); hostHeader = x.optString("host").IfBlankNull();
                     mode = x.optString("mode").IfBlankNull();
+                    // Как в ядре: при extra остальные поля xhttpSettings (кроме host/path/mode) не действуют.
+                    xhttpExtra = XhttpExtra.sanitize((x.optJSONObject("extra") ?? x).ToString());
                 }
                 break;
             case "grpc":
@@ -195,6 +197,7 @@ public static class JsonConfigParser
             serviceName = serviceName,
             headerType = headerType,
             mode = mode,
+            xhttpExtra = xhttpExtra,
             seed = seed,
             publicKey = publicKey,
             shortId = shortId,

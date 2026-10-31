@@ -43,6 +43,7 @@ public static class VlessParser
             serviceName = q.Get("serviceName"),
             headerType = q.Get("headerType"),
             mode = q.Get("mode"),
+            xhttpExtra = XhttpExtra.sanitize(q.Get("extra")),
             seed = q.Get("seed"),
             publicKey = q.Get("pbk"),
             shortId = q.Get("sid"),

@@ -88,6 +88,7 @@ public sealed record ServerProfile
     [JsonPropertyName("serviceName")] public string? serviceName { get; init; }   // grpc
     [JsonPropertyName("headerType")] public string? headerType { get; init; }    // tcp http-header; mkcp тип обфускации заголовка (none/srtp/utp/…)
     [JsonPropertyName("mode")] public string? mode { get; init; }          // xhttp mode (auto/packet-up/stream-up/stream-one); пусто → ядро auto
+    [JsonPropertyName("xhttpExtra"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? xhttpExtra { get; init; }   // xhttpSettings.extra, см. XhttpExtra
     [JsonPropertyName("seed")] public string? seed { get; init; }          // mkcp seed (обфускация)
 
     // --- reality ---
