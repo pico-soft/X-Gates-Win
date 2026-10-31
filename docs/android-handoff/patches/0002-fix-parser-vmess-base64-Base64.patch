@@ -1,0 +1,44 @@
+From aaad69a9f80dd76e1b6eb771c5070cbb0836d26a Mon Sep 17 00:00:00 2001
+From: PICO-SOFT <pico.soft.github@gmail.com>
+Date: Sat, 31 Oct 2026 00:03:09 +0000
+Subject: [PATCH] =?UTF-8?q?fix(parser):=20vmess-=D1=81=D1=81=D1=8B=D0=BB?=
+ =?UTF-8?q?=D0=BA=D0=B8=20=D0=B2=D0=B8=D0=B4=D0=B0=20<base64>=3D=3F=D1=85?=
+ =?UTF-8?q?=D0=B2=D0=BE=D1=81=D1=82=20=D0=BE=D1=82=D0=B1=D1=80=D0=B0=D1=81?=
+ =?UTF-8?q?=D1=8B=D0=B2=D0=B0=D0=BB=D0=B8=D1=81=D1=8C=20=E2=80=94=20Base64?=
+ =?UTF-8?q?=20=D0=B1=D0=B5=D1=80=D1=91=D0=BC=20=D0=B4=D0=BE=20=C2=AB=3F?=
+ =?UTF-8?q?=C2=BB?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+~1.5% реальных vmess-ссылок приходят как `vmess://<base64>=?remarks=…` (хвост без &, поэтому детект
+query-формата их не откладывает). Хвост уходил в Base64.decode → исключение → сервер молча отброшен.
+Теперь декодируем часть до «?»; хвост не нужен (имя сервера — в "ps" JSON). Ссылки с ? и & (vmess-std)
+по-прежнему откладываются.
+
+Найдено при порте на Windows (X-Gates-Win, docs/decisions.md «Найдено в Android-коде» №2).
+---
+ .../com/picosoft/xrayproxydroid/xray/link/VmessParser.kt     | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/app/src/main/java/com/picosoft/xrayproxydroid/xray/link/VmessParser.kt b/app/src/main/java/com/picosoft/xrayproxydroid/xray/link/VmessParser.kt
+index bb82f9d..ada0bab 100644
+--- a/app/src/main/java/com/picosoft/xrayproxydroid/xray/link/VmessParser.kt
++++ b/app/src/main/java/com/picosoft/xrayproxydroid/xray/link/VmessParser.kt
+@@ -20,9 +20,12 @@ object VmessParser : LinkParser {
+ 
+         // Детект query-формата (vmess-std) по наличию ? и & — откладываем, не крашим.
+         if (body.contains('?') && body.contains('&')) return null
++        // Находка порта Windows №2: ~1.5% реальных ссылок — `vmess://<base64>=?хвост` (без &): хвост ломал Base64 и
++        // сервер отбрасывался. Base64-часть — до «?», хвост не нужен (имя — в "ps" JSON).
++        val b64 = body.substringBefore('?')
+ 
+         val json = try {
+-            val padded = body + "=".repeat((4 - body.length % 4) % 4) // паддинг до кратности 4
++            val padded = b64 + "=".repeat((4 - b64.length % 4) % 4) // паддинг до кратности 4
+             String(Base64.decode(padded, Base64.DEFAULT), Charsets.UTF_8)
+         } catch (e: Exception) {
+             return null
+-- 
+2.43.0
+

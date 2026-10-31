@@ -138,6 +138,8 @@ Android-КК получает хэндофф** (`docs/android-handoff/`) с те
    → JSON-серверы со splithttp не собираются. **ИСПРАВЛЕНО:** splithttp — синоним xhttp в `XrayConfigBuilder`
    (как raw→tcp, kcp→mkcp); профиль не меняется (serverKey стабилен). Патч Android — `patches/0001`.
 2. ~1.5% реальных vmess-ссылок вида `vmess://<base64>=?…` отбрасываются (хвост после паддинга ломает Base64).
+   **ИСПРАВЛЕНО:** Base64 декодируется до «?» (хвост не нужен — имя в "ps"); ссылки с ? и & (vmess-std) по-прежнему
+   откладываются. Корпус golden пополнен двумя такими ссылками. Патч Android — `patches/0002`.
 3. `NetworkMonitor.rebuildAndRateTop`: `coerceIn(targetTop, needMeasure.size)` при `needMeasure < 10` — пустой
    диапазон → IllegalArgumentException → «Ошибка фон-рейтинга топа», фон-рейтинг ничего не мерит (малые пулы).
 4. `ServerSpeedTester.fetchViaTempInstance`: исключение `startLoop` не ловится → обрывает ВЕСЬ каскад загрузки
