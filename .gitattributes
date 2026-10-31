@@ -1,0 +1,4 @@
+# Корпус golden и эталоны тестов — байт в байт как в репозитории. На Windows git по умолчанию (core.autocrlf)
+# превращает LF в CRLF при checkout: длина тела подписки в эталоне расходится (первый прогон CI на Windows 2026-10-31).
+tools/golden/corpus/** -text
+tests/XGates.Core.Tests/Golden/** -text
