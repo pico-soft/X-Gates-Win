@@ -34,9 +34,8 @@ public sealed class CrashReporterTests : IDisposable
         Assert.Contains("Версия: 9.9 beta (versionCode 99)", report);
         Assert.Contains("Поток: monitor", report);
         Assert.Contains("упал на <адрес>", report);
-        // Имя класса исключения (≥24 символов) маска «токенов» съедает — паритет с Android
-        // (docs/decisions.md, «Найдено в Android-коде» №6).
-        Assert.Contains("System.<токен>", report);
+        // Имя класса исключения (≥24 символов) в отчёте остаётся (находка порта №6: раньше маска его съедала).
+        Assert.Contains("System.InvalidOperationException", report);
         Assert.DoesNotContain("vless://", report);
         Assert.DoesNotContain("3f2504e0-4f89-41d3-9a0c-0305e82c3301", report);
         Assert.DoesNotContain("203.0.113.77", report);

@@ -1,0 +1,76 @@
+From 1b34b0f3c8a72a54743f65affd46e08c1a08342f Mon Sep 17 00:00:00 2001
+From: PICO-SOFT <pico.soft.github@gmail.com>
+Date: Sat, 31 Oct 2026 00:24:04 +0000
+Subject: [PATCH] =?UTF-8?q?fix(crash):=20=D0=BC=D0=B0=D1=81=D0=BA=D0=B0=20?=
+ =?UTF-8?q?=D0=BE=D1=82=D1=87=D1=91=D1=82=D0=B0=20=D1=81=D1=8A=D0=B5=D0=B4?=
+ =?UTF-8?q?=D0=B0=D0=BB=D0=B0=20=D0=B8=D0=BC=D0=B5=D0=BD=D0=B0=20=D0=B8?=
+ =?UTF-8?q?=D1=81=D0=BA=D0=BB=D1=8E=D1=87=D0=B5=D0=BD=D0=B8=D0=B9=20=D0=B8?=
+ =?UTF-8?q?=20=D0=BC=D0=B5=D1=82=D0=BE=D0=B4=D0=BE=D0=B2=20=E2=80=94=20?=
+ =?UTF-8?q?=C2=AB=D1=87=D1=82=D0=BE=20=D1=83=D0=BF=D0=B0=D0=BB=D0=BE=C2=BB?=
+ =?UTF-8?q?=20=D0=BD=D0=B5=20=D0=B1=D1=8B=D0=BB=D0=BE=20=D0=B2=D0=B8=D0=B4?=
+ =?UTF-8?q?=D0=BD=D0=BE?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Sanitizer: маска «токенов» [A-Za-z0-9+/=_\-]{24,} закрывала и IllegalArgumentException,
+ConcurrentModificationException, длинные имена методов в трассировке → отчёт о сбое терял главное. Теперь слово
+ТОЛЬКО из латинских букв не маскируется (ключи/base64/hex почти всегда содержат цифры или +/=_-; 24 случайных
+символа base64 без них — ~0,7%). Адреса, UUID, логины, IP и токены с цифрами маскируются как раньше.
+
+Найдено при порте на Windows (X-Gates-Win, docs/decisions.md «Найдено в Android-коде» №6).
+---
+ .../xrayproxydroid/crash/CrashReporter.kt       |  5 ++++-
+ .../picosoft/xrayproxydroid/SanitizerTest.kt    | 17 +++++++++++++++++
+ 2 files changed, 21 insertions(+), 1 deletion(-)
+
+diff --git a/app/src/main/java/com/picosoft/xrayproxydroid/crash/CrashReporter.kt b/app/src/main/java/com/picosoft/xrayproxydroid/crash/CrashReporter.kt
+index 54c9bb9..87ddc52 100644
+--- a/app/src/main/java/com/picosoft/xrayproxydroid/crash/CrashReporter.kt
++++ b/app/src/main/java/com/picosoft/xrayproxydroid/crash/CrashReporter.kt
+@@ -177,5 +177,8 @@ object Sanitizer {
+         .replace(creds, "<логин>@")
+         .replace(uuid, "<uuid>")
+         .replace(ip, "<ip>")
+-        .replace(token, "<токен>")
++        // Находка порта Windows №6: слово ТОЛЬКО из латинских букв — имя исключения/метода (IllegalArgumentException,
++        // rebuildAndRateTop), его не маскируем: иначе отчёт теряет главное — ЧТО упало. Ключи/base64/hex почти
++        // всегда содержат цифры или +/=_- (24 случайных символа base64 без них — ~0,7%).
++        .replace(token) { m -> if (m.value.all { it in 'A'..'Z' || it in 'a'..'z' }) m.value else "<токен>" }
+ }
+diff --git a/app/src/test/java/com/picosoft/xrayproxydroid/SanitizerTest.kt b/app/src/test/java/com/picosoft/xrayproxydroid/SanitizerTest.kt
+index a391d4c..f040881 100644
+--- a/app/src/test/java/com/picosoft/xrayproxydroid/SanitizerTest.kt
++++ b/app/src/test/java/com/picosoft/xrayproxydroid/SanitizerTest.kt
+@@ -1,6 +1,7 @@
+ package com.picosoft.xrayproxydroid
+ 
+ import com.picosoft.xrayproxydroid.crash.Sanitizer
++import org.junit.Assert.assertEquals
+ import org.junit.Assert.assertFalse
+ import org.junit.Assert.assertTrue
+ import org.junit.Test
+@@ -45,4 +46,20 @@ class SanitizerTest {
+         assertTrue("модель устройства", clean.contains("SM-S908E"))
+         assertTrue("версия Android", clean.contains("Android 14"))
+     }
++
++    @Test
++    fun `keeps exception and method names but masks keys`() {
++        // Находка порта Windows №6: имена исключений/методов ≥24 букв раньше превращались в «<токен>».
++        val raw = "java.lang.IllegalArgumentException: Cannot coerce value\n" +
++            "java.util.ConcurrentModificationException\n" +
++            "    at com.picosoft.xrayproxydroid.monitor.NetworkMonitor.rebuildAndRateTopWithFallback(NetworkMonitor.kt:1374)\n" +
++            "pbk=SxYzKz3vV9nGq0rUe8yH2bJk5mWp7tLc4aDfRhNs1Eo hex=0123456789abcdef0123456789abcdef"
++        val clean = Sanitizer.clean(raw)
++        assertTrue(clean.contains("IllegalArgumentException"))
++        assertTrue(clean.contains("ConcurrentModificationException"))
++        assertTrue(clean.contains("rebuildAndRateTopWithFallback"))
++        assertFalse("ключ reality (base64)", clean.contains("SxYzKz3vV9nGq0rUe8yH2bJk5mWp7tLc4aDfRhNs1Eo"))
++        assertFalse("hex", clean.contains("0123456789abcdef0123456789abcdef"))
++        assertEquals(2, clean.split("<токен>").size - 1)
++    }
+ }
+-- 
+2.43.0
+
