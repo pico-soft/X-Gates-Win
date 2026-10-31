@@ -126,7 +126,10 @@ public sealed class CoreControllerIntegrationTests : IDisposable
             var core = L.newCoreController(new LocalTestNet.NoopCallback());
             var e = Assert.Throws<XrayCoreException>(() => core.startLoop(XrayConfigBuilder.buildForSpeedTest(LocalVless(server), port), 0));
             Assert.Contains("startup failed", e.Message);
-            Assert.Contains("address already in use", e.Message, StringComparison.OrdinalIgnoreCase);
+            // Текст ошибки ОС: Linux/macOS — «address already in use», Windows (WSAEADDRINUSE) — «Only one usage of
+            // each socket address … is normally permitted».
+            Assert.True(e.Message.Contains("address already in use", StringComparison.OrdinalIgnoreCase)
+                        || e.Message.Contains("only one usage of each socket address", StringComparison.OrdinalIgnoreCase), e.Message);
             Assert.False(core.isRunning);
         }
         finally { busy.Stop(); }

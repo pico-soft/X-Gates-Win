@@ -87,4 +87,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # Консоль Windows (cp1252/cp866) не кодирует кириллицу сообщений → UnicodeEncodeError в конце работы.
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     main()
