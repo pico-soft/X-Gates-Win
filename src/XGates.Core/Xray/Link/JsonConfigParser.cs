@@ -117,6 +117,8 @@ public static class JsonConfigParser
             alpn = string.Join(",", parts).IfBlankNull();
         }
         var allowInsecure = tls?.optBoolean("allowInsecure", false) ?? false;
+        var pinnedPeerCertSha256 = tls?.optString("pinnedPeerCertSha256").IfBlankNull();
+        var verifyPeerCertByName = tls?.optString("verifyPeerCertByName").IfBlankNull();
         var publicKey = reality?.optString("publicKey").IfBlankNull();
         var shortId = reality?.optString("shortId").IfBlankNull();
         var spiderX = reality?.optString("spiderX").IfBlankNull();
@@ -185,6 +187,8 @@ public static class JsonConfigParser
             fingerprint = fingerprint,
             alpn = alpn,
             allowInsecure = allowInsecure,
+            pinnedPeerCertSha256 = pinnedPeerCertSha256,
+            verifyPeerCertByName = verifyPeerCertByName,
             network = network,
             path = path,
             hostHeader = hostHeader,

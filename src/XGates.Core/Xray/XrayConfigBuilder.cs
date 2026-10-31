@@ -230,9 +230,10 @@ public static class XrayConfigBuilder
 
     private static string tlsBlock(ServerProfile p)
     {
+        // allowInsecure не пишем: ядро v26 отвергает конфиг с true. Такой сервер запускается и проверяет сертификат как
+        // обычно; пропустить проверку больше нельзя, самоподписанному нужен pcs (его даёт ссылка).
         var fields = new List<string>
         {
-            "\"allowInsecure\": " + (p.allowInsecure ? "true" : "false"),
             "\"serverName\": " + j(p.sni ?? p.address),
         };
         if (p.fingerprint.IsNotBlank()) fields.Add("\"fingerprint\": " + j(p.fingerprint!));
@@ -241,6 +242,8 @@ public static class XrayConfigBuilder
             var alpnArr = string.Join(", ", p.alpn!.Split(',').Select(it => j(it.KTrim())));
             fields.Add("\"alpn\": [" + alpnArr + "]");
         }
+        if (normalizePinnedCerts(p.pinnedPeerCertSha256) is { } pins) fields.Add("\"pinnedPeerCertSha256\": " + j(pins));
+        if (p.verifyPeerCertByName.IsNotBlank()) fields.Add("\"verifyPeerCertByName\": " + j(p.verifyPeerCertByName!));
         return "{ " + string.Join(", ", fields) + " }";
     }
 

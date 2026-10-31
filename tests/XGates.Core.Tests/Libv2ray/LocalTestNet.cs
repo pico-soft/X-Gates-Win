@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json.Nodes;
 using XGates.Core.Libv2ray;
@@ -73,9 +75,48 @@ public sealed class LocalTestNet : IDisposable
 
     public int StartVlessServer(string network = "tcp", string path = "/ws")
     {
-        int port = FreePort();
         var stream = new JsonObject { ["network"] = network };
         if (network == "ws") stream["wsSettings"] = new JsonObject { ["path"] = path };
+        return StartServer(stream);
+    }
+
+    /// <summary>Самоподписанный сертификат стенда; SHA-256 от DER — то, что ядро сверяет в pinnedPeerCertSha256.</summary>
+    public sealed record TestCert(string CertPem, string KeyPem, string Sha256Hex);
+
+    public static TestCert MakeCert(string name)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var req = new CertificateRequest($"CN={name}", key, HashAlgorithmName.SHA256);
+        var san = new SubjectAlternativeNameBuilder();
+        san.AddDnsName(name);
+        req.CertificateExtensions.Add(san.Build());
+        using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(2));
+        return new TestCert(cert.ExportCertificatePem(), key.ExportPkcs8PrivateKeyPem(), Convert.ToHexStringLower(SHA256.HashData(cert.RawData)));
+    }
+
+    /// <summary>vless поверх настоящего TLS; [xhttp] — настройки транспорта xhttp (null — tcp).</summary>
+    public int StartVlessTlsServer(TestCert cert, JsonObject? xhttp = null)
+    {
+        var stream = new JsonObject
+        {
+            ["network"] = xhttp != null ? "xhttp" : "tcp",
+            ["security"] = "tls",
+            ["tlsSettings"] = new JsonObject
+            {
+                ["alpn"] = new JsonArray("h2", "http/1.1"),
+                ["certificates"] = new JsonArray(new JsonObject { ["certificate"] = PemLines(cert.CertPem), ["key"] = PemLines(cert.KeyPem) }),
+            },
+        };
+        if (xhttp != null) stream["xhttpSettings"] = xhttp;
+        return StartServer(stream);
+    }
+
+    private static JsonArray PemLines(string pem) =>
+        new(pem.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => (JsonNode?)JsonValue.Create(l.TrimEnd('\r'))).ToArray());
+
+    private int StartServer(JsonObject stream)
+    {
+        int port = FreePort();
         var cfg = new JsonObject
         {
             ["log"] = new JsonObject { ["loglevel"] = "warning" },

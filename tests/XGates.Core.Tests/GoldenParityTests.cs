@@ -28,6 +28,13 @@ public class GoldenParityTests
 
     private static JsonNode? ProfileNode(ServerProfile p) => JsonSerializer.SerializeToNode(p);
 
+    /// <summary>
+    /// Ожидаемое расхождение: Windows уже не пишет allowInsecure (ядро v26 отвергает конфиг с true), Android — до правки
+    /// по хэндоффу (UPSTREAM-SYNC.md, п. 0012). После неё golden переснять, а это сравнение убрать: замена станет пустой.
+    /// </summary>
+    private static string WithoutAllowInsecure(string kotlinConfig) =>
+        kotlinConfig.Replace("\"allowInsecure\": false, ", "").Replace("\"allowInsecure\": true, ", "");
+
     /// <summary>Kotlin пишет ошибку как «ERROR: IllegalArgumentException: msg»; в C# — ArgumentException(msg).</summary>
     private static string Attempt(Func<string> f)
     {
@@ -62,9 +69,9 @@ public class GoldenParityTests
                     if (!JsonNode.DeepEquals(cs, g["profile"]))
                         errors.Add($"{Where()}: profile\n  kt: {g["profile"]!.ToJsonString()}\n  cs: {cs!.ToJsonString()}");
                     var cfg = Attempt(() => XrayConfigBuilder.build(s.profile));
-                    if (cfg != g["config"]!.GetValue<string>()) errors.Add($"{Where()}: config differs\n--kt--\n{g["config"]}\n--cs--\n{cfg}");
+                    if (cfg != WithoutAllowInsecure(g["config"]!.GetValue<string>())) errors.Add($"{Where()}: config differs\n--kt--\n{g["config"]}\n--cs--\n{cfg}");
                     var sp = Attempt(() => XrayConfigBuilder.buildForSpeedTest(s.profile, 23456));
-                    if (sp != g["speedConfig"]!.GetValue<string>()) errors.Add($"{Where()}: speedConfig differs\n--kt--\n{g["speedConfig"]}\n--cs--\n{sp}");
+                    if (sp != WithoutAllowInsecure(g["speedConfig"]!.GetValue<string>())) errors.Add($"{Where()}: speedConfig differs\n--kt--\n{g["speedConfig"]}\n--cs--\n{sp}");
                     break;
                 case ParseResult.Unsupported u:
                     if (kind != "Unsupported" || u.scheme != g["scheme"]!.GetValue<string>() || u.raw != g["raw"]!.GetValue<string>())

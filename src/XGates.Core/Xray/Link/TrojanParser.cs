@@ -36,6 +36,8 @@ public static class TrojanParser
             fingerprint = q.Get("fp"),
             alpn = q.Get("alpn"),
             allowInsecure = q.Get("allowInsecure") == "1" || q.Get("insecure") == "1",
+            pinnedPeerCertSha256 = q.Get("pcs").IfBlankNull(),
+            verifyPeerCertByName = q.Get("vcn").IfBlankNull(),
             network = q.Get("type") ?? "tcp",
             path = q.Get("path"),
             hostHeader = q.Get("host"),
