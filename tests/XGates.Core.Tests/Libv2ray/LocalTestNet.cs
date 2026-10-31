@@ -111,6 +111,39 @@ public sealed class LocalTestNet : IDisposable
         return StartServer(stream);
     }
 
+    /// <summary>
+    /// vless поверх REALITY: маскировочный target — TLS-сервер стенда, ключи выдаёт сам xray. Вернёт порт и то, что нужно
+    /// клиенту в ссылке.
+    /// </summary>
+    public (int port, string publicKey, string shortId) StartVlessRealityServer(TestCert cert, string serverName, JsonObject? xhttp = null)
+    {
+        var (privateKey, publicKey) = RealityKeys();
+        const string shortId = "ab12cd34";
+        var stream = new JsonObject
+        {
+            ["network"] = xhttp != null ? "xhttp" : "tcp",
+            ["security"] = "reality",
+            ["realitySettings"] = new JsonObject
+            {
+                ["target"] = $"127.0.0.1:{StartVlessTlsServer(cert)}",
+                ["serverNames"] = new JsonArray(serverName),
+                ["privateKey"] = privateKey,
+                ["shortIds"] = new JsonArray(shortId),
+            },
+        };
+        if (xhttp != null) stream["xhttpSettings"] = xhttp;
+        return (StartServer(stream), publicKey, shortId);
+    }
+
+    private static (string privateKey, string publicKey) RealityKeys()
+    {
+        using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(XrayPath, "x25519") { RedirectStandardOutput = true })!;
+        var lines = p.StandardOutput.ReadToEnd().Split('\n');
+        p.WaitForExit();
+        string Value(string prefix) => lines.First(l => l.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).Split(':', 2)[1].Trim();
+        return (Value("PrivateKey"), Value("Password"));
+    }
+
     private static JsonArray PemLines(string pem) =>
         new(pem.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => (JsonNode?)JsonValue.Create(l.TrimEnd('\r'))).ToArray());
 

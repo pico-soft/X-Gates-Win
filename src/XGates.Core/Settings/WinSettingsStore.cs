@@ -6,7 +6,8 @@ namespace XGates.Core.Settings;
 
 /// <summary>
 /// Настройки, которых НЕТ в Android-версии (Windows-специфика). Отдельный файл win_settings.json, чтобы settings.json
-/// оставался байт в байт совместим с Android (паритет, StoreCompatTests). Сейчас: порты локального прокси (§13.7).
+/// оставался байт в байт совместим с Android (паритет, StoreCompatTests). Сейчас: порты локального прокси (§13.7) и
+/// фрагментация ClientHello.
 /// Автозапуск при входе в Windows здесь НЕ хранится — его источник правды сам реестр (HKCU\…\Run), чтобы
 /// флажок не расходился с фактом.
 /// </summary>
@@ -14,6 +15,7 @@ public sealed record WinSettings
 {
     [JsonPropertyName("socksPort")] public int socksPort { get; init; } = XrayConfig.DEFAULT_SOCKS_PORT;
     [JsonPropertyName("httpPort")] public int httpPort { get; init; } = XrayConfig.DEFAULT_HTTP_PORT;
+    [JsonPropertyName("tlsFragment")] public bool tlsFragment { get; init; }
 }
 
 public static class WinSettingsStore

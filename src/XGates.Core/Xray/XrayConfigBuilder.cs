@@ -22,6 +22,8 @@ public static class XrayConfigBuilder
     //  • kcp/mkcp — одно и то же (нормализуем kcp→mkcp).
     private static readonly HashSet<string> SUPPORTED_NETWORKS = ["tcp", "raw", "ws", "grpc", "xhttp", "splithttp", "httpupgrade", "kcp", "mkcp"];
 
+    private const string FRAGMENT_TAG = "fragment";
+
     /// <summary>Боевой конфиг: общий inbound (socks 10815 + http 10816) + outbound сервера.</summary>
     public static string build(ServerProfile p) => $$"""
         {
@@ -31,7 +33,7 @@ public static class XrayConfigBuilder
           {{XrayConfig.inbounds()}},
           "outbounds": [
             {{outboundFor(p)}},
-            { "tag": "direct", "protocol": "freedom" }
+            { "tag": "direct", "protocol": "freedom" }{{fragmentOutbound(p)}}
           ]
         }
     
@@ -56,7 +58,7 @@ public static class XrayConfigBuilder
           ],
           "outbounds": [
             {{outboundFor(p)}},
-            { "tag": "direct", "protocol": "freedom" }
+            { "tag": "direct", "protocol": "freedom" }{{fragmentOutbound(p)}}
           ]
         }
     
@@ -75,6 +77,16 @@ public static class XrayConfigBuilder
             _ => throw new ArgumentOutOfRangeException(nameof(p)),
         };
     }
+
+    // Фрагментация ClientHello (Windows-настройка): имя сайта идёт в нём открытым текстом, по нему блокировка и срабатывает.
+    // Ядро дробит только на freedom, поэтому соединение с сервером ведём через него (sockopt.dialerProxy). Параметры —
+    // обычные для клиентов Xray: +0,15 с на рукопожатие. Нужно только там, где есть TLS поверх TCP: mkcp — это UDP.
+    private static bool fragmented(ServerProfile p) =>
+        XrayConfig.TLS_FRAGMENT && normalizeStreamSecurity(p.security) != "none" && p.network is not ("kcp" or "mkcp");
+
+    private static string fragmentOutbound(ServerProfile p) => fragmented(p)
+        ? ", { \"tag\": " + j(FRAGMENT_TAG) + ", \"protocol\": \"freedom\", \"settings\": { \"fragment\": { \"packets\": \"tlshello\", \"length\": \"100-200\", \"interval\": \"10-20\" } } }"
+        : "";
 
     // --- outbound по протоколу (единый vnext/users для vless+vmess) ---
 
@@ -194,6 +206,7 @@ public static class XrayConfigBuilder
             case "httpupgrade": parts.Add("\"httpupgradeSettings\": " + httpUpgradeBlock(p)); break;
             case "mkcp": parts.Add("\"kcpSettings\": " + kcpBlock(p)); break;
         }
+        if (fragmented(p)) parts.Add("\"sockopt\": { \"dialerProxy\": " + j(FRAGMENT_TAG) + " }");
         return "{ " + string.Join(", ", parts) + " }";
     }
 
@@ -207,7 +220,7 @@ public static class XrayConfigBuilder
             "\"host\": " + j(host),
         };
         if (p.mode.IsNotBlank()) fields.Add("\"mode\": " + j(p.mode!));
-        if (XhttpExtra.forConfig(p.xhttpExtra, p.mode) is { } extra) fields.Add("\"extra\": " + extra);
+        if (XhttpExtra.forConfig(p.xhttpExtra, p.mode, fragmented(p) ? FRAGMENT_TAG : null) is { } extra) fields.Add("\"extra\": " + extra);
         return "{ " + string.Join(", ", fields) + " }";
     }
 

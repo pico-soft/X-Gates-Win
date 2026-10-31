@@ -34,14 +34,20 @@ internal static class XhttpExtra
         return res.length() > 0 ? res.ToString() : null;
     }
 
-    /// <summary>Значение extra для конфига. stream-one с downloadSettings ядро отвергает, поэтому такой блок убираем.</summary>
-    public static string? forConfig(string? saved, string? mode)
+    /// <summary>
+    /// Значение extra для конфига. stream-one с downloadSettings ядро отвергает, поэтому такой блок убираем.
+    /// [dialerProxy]: канал загрузки sockopt основного соединения не наследует, поэтому ставим явно.
+    /// </summary>
+    public static string? forConfig(string? saved, string? mode, string? dialerProxy = null)
     {
         if (sanitize(saved) is not { } safe) return null;
-        if (mode != "stream-one") return safe;
         var o = new JSONObject(safe);
-        var res = pick(o, XHTTP_FIELDS);
-        return res.length() > 0 ? res.ToString() : null;
+        if (o.optJSONObject("downloadSettings") is { } d)
+        {
+            if (mode == "stream-one") o = pick(o, XHTTP_FIELDS);
+            else if (dialerProxy != null) d.put("sockopt", new JSONObject().put("dialerProxy", dialerProxy));
+        }
+        return o.length() > 0 ? o.ToString() : null;
     }
 
     private static JSONObject pick(JSONObject src, HashSet<string> allowed)

@@ -18,6 +18,9 @@ public static class XrayConfig
     /// <summary>Локальный HTTP-inbound.</summary>
     public static int HTTP_PORT => Settings.WinSettingsStore.current().httpPort;
 
+    /// <summary>Дробить ClientHello (настройка, по умолчанию выкл; см. <see cref="XrayConfigBuilder"/>).</summary>
+    public static bool TLS_FRAGMENT => Settings.WinSettingsStore.current().tlsFragment;
+
     /// <summary>Нижняя граница порта: ниже 1024 — системные, Windows их тоже резервирует под службы.</summary>
     public const int MIN_PORT = 1024;
 
