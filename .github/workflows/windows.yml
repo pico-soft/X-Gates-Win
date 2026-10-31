@@ -47,11 +47,14 @@ jobs:
 
       - name: Запуск окна, трей, один экземпляр, скриншоты
         if: always()
-        shell: powershell   # Windows PowerShell 5.1: UIAutomationClient из .NET Framework — без сюрпризов pwsh 7
+        # Windows PowerShell 5.1: UIAutomationClient из .NET Framework — без сюрпризов pwsh 7. 5.1 читает файл шага в
+        # кодировке ANSI (UTF-8 без BOM ломает кириллицу: «т» → U+201A = кавычка → ParserError, прогон 2026-10-31) —
+        # поэтому скрипт ниже только ASCII.
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force out/smoke | Out-Null
-          # Автоподключение выключаем ДО запуска: на раннере к серверам не ходим.
+          # Turn auto-connect off BEFORE launch: no real servers on the runner.
           $data = Join-Path $env:LOCALAPPDATA 'X-Gates'
           New-Item -ItemType Directory -Force $data | Out-Null
           [IO.File]::WriteAllText((Join-Path $data 'settings.json'), '{"autoStartOnLaunch":false}', (New-Object System.Text.UTF8Encoding $false))
@@ -76,29 +79,29 @@ jobs:
           $exe = (Resolve-Path out/publish/XGatesWin/XGatesWin.exe).Path
           $p = Start-Process $exe -PassThru
           $w = FindWindow $p.Id 40
-          if (-not $w) { Shot 'no-window'; throw 'окно не появилось за 40 с' }
-          Write-Host "окно: '$($w.Current.Name)'"
+          if (-not $w) { Shot 'no-window'; throw 'window did not appear within 40 s' }
+          Write-Host "window: '$($w.Current.Name)'"
           Start-Sleep 4; Shot '1-main'
           $tabCond = New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::TabItem)
           $tabs = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, $tabCond)
-          Write-Host "вкладок: $($tabs.Count)"
+          Write-Host "tabs: $($tabs.Count)"
           $n = 2
           foreach ($t in $tabs) {
             $t.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
             Start-Sleep 2; Shot "$n-tab-$($t.Current.Name.Trim())"; $n++
           }
-          # Закрытие окна = в трей: процесс жив, окна не видно.
+          # Closing the window = to tray: process alive, no window.
           $w.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
           Start-Sleep 3
-          if ($p.HasExited) { throw 'после закрытия окна процесс завершился (ожидался трей)' }
+          if ($p.HasExited) { throw 'process exited after window close (expected tray)' }
           Shot "$n-closed-to-tray"; $n++
-          # Второй запуск: та копия показывает окно, новая выходит сама.
+          # Second launch: the first copy shows its window, the new one exits.
           $p2 = Start-Process $exe -PassThru
-          if (-not $p2.WaitForExit(15000)) { throw 'второй экземпляр не завершился' }
+          if (-not $p2.WaitForExit(15000)) { throw 'second instance did not exit' }
           $w = FindWindow $p.Id 15
-          if (-not $w) { throw 'первый экземпляр не показал окно по второму запуску' }
+          if (-not $w) { throw 'first instance did not show window on second launch' }
           Start-Sleep 2; Shot "$n-reopened"
-          Write-Host "процессов XGatesWin: $((Get-Process XGatesWin -ErrorAction SilentlyContinue).Count)"
+          Write-Host "XGatesWin processes: $((Get-Process XGatesWin -ErrorAction SilentlyContinue).Count)"
           Stop-Process -Id $p.Id -Force
           Copy-Item (Join-Path $data 'logs/x-gates.log') out/smoke/ -ErrorAction SilentlyContinue
 
@@ -112,8 +115,15 @@ jobs:
           $wix = Join-Path $env:USERPROFILE '.dotnet\tools\wix.exe'   # PATH к инструментам dotnet в этом шаге может не обновиться
           New-Item -ItemType Directory -Force out/msi | Out-Null
           $msi = "out/msi/XGatesWin-$ver-win-x64.msi"
-          & $wix build installer/XGatesWin.wxs -arch x64 -bindpath publish=out/publish/XGatesWin -d Version=$ver -d IconPath=src/XGates.Win/Assets/app.ico -o $msi
+          # Пути — абсолютные: относительный bindpath для <Files Include> WiX считает от папки .wxs (installer/) →
+          # в прогоне 2026-10-31 MSI вышел пустым (98 КБ, предупреждение WIX8601) и ничего не установил.
+          $pub = (Resolve-Path out/publish/XGatesWin).Path
+          $ico = (Resolve-Path src/XGates.Win/Assets/app.ico).Path
+          & $wix build installer/XGatesWin.wxs -arch x64 -bindpath "publish=$pub" -d Version=$ver -d "IconPath=$ico" -o $msi
           if ($LASTEXITCODE -ne 0) { throw "wix build: $LASTEXITCODE" }
+          $size = (Get-Item $msi).Length
+          Write-Host "MSI: $([math]::Round($size / 1MB, 1)) МБ"
+          if ($size -lt 20MB) { throw "MSI подозрительно мал ($size байт) — файлы программы не попали" }
           # В v5 build не гоняет ICE — отдельно; ICE105 — правило для пакетов «на пользователя или на машину».
           & $wix msi validate $msi -ice ICE105
           if ($LASTEXITCODE -ne 0) { Write-Warning "wix msi validate: $LASTEXITCODE" }
