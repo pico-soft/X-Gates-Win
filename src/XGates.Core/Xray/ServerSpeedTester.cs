@@ -427,8 +427,12 @@ public static class ServerSpeedTester
                 log($"«{name}» fetchViaTempInstance http={res.httpCode} bytes={res.bodyBytes}");
                 return res;
             }
-            // Паритет с Kotlin: catch НЕТ — исключение startLoop (gomobile/процесс) летит наружу и обрывает каскад
-            // (refreshAllEnabled/DefaultSeeder его ловят). Кандидат на улучшение в ОБЕИХ версиях: ловить и идти дальше.
+            // Находка порта №4: исключение startLoop (битый конфиг сервера — ядро не стартует) раньше летело наружу и
+            // обрывало ВЕСЬ каскад загрузки. Теперь это провал ОДНОГО кандидата: null → каскад берёт следующего.
+            catch (Exception e)
+            {
+                log($"«{name}» fetchViaTempInstance ядро не стартовало: {e.Message}"); return null;
+            }
             finally
             {
                 try { core.stopLoop(); } catch (Exception) { /* ignore */ }

@@ -112,6 +112,36 @@ public sealed class CascadeFetchIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void Temp_instance_stage_skips_candidate_whose_core_fails_to_start()
+    {
+        // Находка порта №4: исключение запуска ядра temp-инстанса (здесь — битый ключ reality, ядро не стартует)
+        // летело из fetchViaTempInstance наружу и обрывало ВЕСЬ каскад. Теперь кандидат пропускается, идём к следующему.
+        int server = net.StartVlessServer();
+        SubscriptionManager.init(ctx);
+        var (_, add) = SubscriptionManager.addLocalFromBody(ctx,
+            $"vless://{LocalTestNet.Uuid}@127.0.0.1:{LocalTestNet.FreePort()}?type=tcp&security=reality&pbk=PUB&sid=00&sni=s.example.com&fp=chrome#bad\n" +
+            $"vless://{LocalTestNet.Uuid}@127.0.0.1:{server}?type=tcp&security=none#good", "local");
+        Assert.True(add.ok, add.error);
+        var all = SubscriptionManager.allServers(ctx);
+        var bad = all.Single(p => p.remarks == "bad");
+        // Оба «недавно рабочие»; битый быстрее → его temp-инстанс пробуется ПЕРВЫМ.
+        SubscriptionManager.applySpeedResults(ctx, new Dictionary<string, double>
+        {
+            [SubscriptionManager.serverKey(bad)] = 90,
+            [SubscriptionManager.serverKey(all.Single(p => p.remarks == "good"))] = 50,
+        });
+        Assert.Null(ServerSpeedTester.fetchViaTempInstance(ctx, bad, U("/sub"), "ua", 5000));   // раньше — исключение
+
+        // Каскад целиком: тела не принимаем нигде (как «заглушка блокировщика»), чтобы дойти до 6-й ступени.
+        var r = CascadeFetch.fetch(ctx, U("/sub"), "ua", 3000, 5000, 60_000, acceptBody: _ => false);
+        var temp = r.attempts.Where(a => a.stage == FetchStage.TEMP_RECENT && !a.skipped).ToList();
+        Assert.Equal(new[] { "bad", "good" }, temp.Select(a => a.note));
+        Assert.Null(temp[0].result);                              // ядро не поднялось — кандидат пропущен
+        Assert.True(temp[1].result is { ok: true }, "через живой temp-инстанс тело получено");
+        Assert.True(SubscriptionManager.hasSupportedLinks(temp[1].result!.body));
+    }
+
+    [Fact]
     public void RetryAfter_parsing()
     {
         Assert.Equal(120, SubscriptionFetcher.parseRetryAfter(" 120 "));

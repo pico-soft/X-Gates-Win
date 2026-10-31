@@ -203,16 +203,26 @@ public sealed class UpdateFlowIntegrationTests : IDisposable
         net.Files.Clear(); net.Redirects.Clear();
         Assert.IsType<UpdateInstaller.DownloadOutcome.Ok>(UpdateInstaller.download(ctx, a));
 
-        // Оба адреса отдают не тот файл → отказ, файла нет. Текст — подсказка «прокси не запущен», как на Android
-        // (паритет; неточность записана в docs/decisions.md, «Найдено в Android-коде» №7).
+        // Оба адреса отдают не тот файл (прокси не запущен) → отказ «сумма не совпала», файла нет. Подсказка «прокси не
+        // запущен» здесь была бы ложной: файл дошёл (находка порта №7, раньше показывалась именно она).
         File.Delete(ok.file);
         net.Files[$"{Dl("v0.7")}/{rel.msiName}"] = RandomNumberGenerator.GetBytes(1000);
         net.Redirects[$"{Latest}/{rel.msiName}"] = U($"{Dl("v0.7")}/{rel.msiName}");
         var fail = Assert.IsType<UpdateInstaller.DownloadOutcome.Fail>(UpdateInstaller.download(ctx, a));
-        Assert.Equal(UpdateErrorKind.DOWNLOAD_FAILED, fail.kind);
-        Assert.Contains("прокси не запущен", fail.detail);
+        Assert.Equal(UpdateErrorKind.CHECKSUM_MISMATCH, fail.kind);
+        Assert.Contains("ожидали", fail.detail);
+        Assert.DoesNotContain("прокси не запущен", fail.detail);
         Assert.False(File.Exists(ok.file));
         Assert.Empty(Directory.GetFiles(Path.Combine(ctx.filesDir, "updates")));
+
+        // Файл не дошёл ни с одного адреса и прокси не запущен → подсказка про прокси остаётся (поведение прежнее).
+        // (Неизвестный путь стенд отдаёт «204, пустое тело» — это «дошёл не тот файл», поэтому явно 404.)
+        net.Files.Clear(); net.Redirects.Clear();
+        net.Redirects[$"{Latest}/{rel.msiName}"] = U("/status/404");
+        net.Redirects[$"{Dl("v0.7")}/{rel.msiName}"] = U("/status/404");
+        var noFile = Assert.IsType<UpdateInstaller.DownloadOutcome.Fail>(UpdateInstaller.download(ctx, a));
+        Assert.Equal(UpdateErrorKind.DOWNLOAD_FAILED, noFile.kind);
+        Assert.Contains("прокси не запущен", noFile.detail);
     }
 
     [Fact]

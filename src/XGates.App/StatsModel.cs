@@ -21,8 +21,9 @@ public static class StatsModel
         if (!s.monitorEnabled) return "";
         var t = h.lastCheckMs > 0 ? monitorTime(h.lastCheckMs) : "—";
         var ago = h.lastCheckMs > 0 ? $"{Math.Max((nowMs - h.lastCheckMs) / 1000, 0)} с назад" : "—";
-        var interval = Math.Max(s.connectionCheckIntervalSec, 15);
-        return $"● Проверка связи каждые {interval} с · последняя: {t} ({ago}) · циклов: {h.cycles} · {h.state}";
+        var interval = NetworkMonitor.healthyCheckMs(s) / 1000;   // на шнуре — чаще (решение Elyor 2026-10-30)
+        var power = NetworkMonitor.fastChecksOnAc(s) ? " (на шнуре)" : "";
+        return $"● Проверка связи каждые {interval} с{power} · последняя: {t} ({ago}) · циклов: {h.cycles} · {h.state}";
     }
 
     /// <summary>Журнал: свежие сверху, строка «дата · событие» + подробность.</summary>

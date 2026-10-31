@@ -1,0 +1,44 @@
+From e4a38d5b2a3e1626922938cbeb456912a58ee210 Mon Sep 17 00:00:00 2001
+From: PICO-SOFT <pico.soft.github@gmail.com>
+Date: Sat, 31 Oct 2026 00:09:29 +0000
+Subject: [PATCH] =?UTF-8?q?fix(cascade):=20=D0=BE=D0=B4=D0=B8=D0=BD=20?=
+ =?UTF-8?q?=D1=81=D0=B5=D1=80=D0=B2=D0=B5=D1=80=20=D1=81=20=D0=B1=D0=B8?=
+ =?UTF-8?q?=D1=82=D1=8B=D0=BC=20=D0=BA=D0=BE=D0=BD=D1=84=D0=B8=D0=B3=D0=BE?=
+ =?UTF-8?q?=D0=BC=20=D0=BE=D0=B1=D1=80=D1=8B=D0=B2=D0=B0=D0=BB=20=D0=B2?=
+ =?UTF-8?q?=D1=81=D1=8E=20=D0=B7=D0=B0=D0=B3=D1=80=D1=83=D0=B7=D0=BA=D1=83?=
+ =?UTF-8?q?=20=D0=BF=D0=BE=D0=B4=D0=BF=D0=B8=D1=81=D0=BA=D0=B8=20=D1=87?=
+ =?UTF-8?q?=D0=B5=D1=80=D0=B5=D0=B7=20temp-=D0=B8=D0=BD=D1=81=D1=82=D0=B0?=
+ =?UTF-8?q?=D0=BD=D1=81?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+fetchViaTempInstance: исключение core.startLoop (ядро не стартует — напр. битый ключ reality в подписке:
+«Failed to build REALITY config… invalid "password"») не ловилось (try/finally без catch) → летело из
+CascadeFetch.fetch наружу и обрывало ВЕСЬ каскад (ступень 6), остальные «недавно рабочие» кандидаты не
+пробовались. Теперь это провал одного кандидата: null → каскад идёт к следующему.
+
+Найдено при порте на Windows (X-Gates-Win, docs/decisions.md «Найдено в Android-коде» №4); там воспроизведено
+тестом с настоящим ядром (битый reality первым, живой вторым) и проверено после правки.
+---
+ .../com/picosoft/xrayproxydroid/xray/ServerSpeedTester.kt     | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/app/src/main/java/com/picosoft/xrayproxydroid/xray/ServerSpeedTester.kt b/app/src/main/java/com/picosoft/xrayproxydroid/xray/ServerSpeedTester.kt
+index 073c199..471916f 100644
+--- a/app/src/main/java/com/picosoft/xrayproxydroid/xray/ServerSpeedTester.kt
++++ b/app/src/main/java/com/picosoft/xrayproxydroid/xray/ServerSpeedTester.kt
+@@ -368,6 +368,10 @@ object ServerSpeedTester {
+                 if (res.bodyBytes > 0) TrafficTracker.addTest(res.bodyBytes.toLong())
+                 log("«$name» fetchViaTempInstance http=${res.httpCode} bytes=${res.bodyBytes}")
+                 return res
++            } catch (e: Exception) {
++                // Находка порта Windows №4: исключение startLoop (битый конфиг сервера — ядро не стартует) раньше летело
++                // наружу и обрывало ВЕСЬ каскад загрузки. Теперь это провал ОДНОГО кандидата: null → каскад берёт следующего.
++                log("«$name» fetchViaTempInstance ядро не стартовало: ${e.message}"); return null
+             } finally {
+                 try { core.stopLoop() } catch (e: Exception) { /* ignore */ }
+             }
+-- 
+2.43.0
+

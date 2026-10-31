@@ -18,11 +18,20 @@ public sealed class StatsModelTests : IDisposable
     {
         var s = SettingsStore.DEFAULTS;
         var now = JavaSystem.currentTimeMillis();
-        Assert.Equal("", StatsModel.heartbeatLine(s with { monitorEnabled = false }, new MonitorHeartbeat(), now));
-        Assert.Equal("● Проверка связи каждые 60 с · последняя: — (—) · циклов: 0 · —", StatsModel.heartbeatLine(s, new MonitorHeartbeat(), now));
-        var line = StatsModel.heartbeatLine(s with { connectionCheckIntervalSec = 5 }, new MonitorHeartbeat(true, "OK", now - 7_500, 3), now);
-        Assert.StartsWith("● Проверка связи каждые 15 с · последняя: ", line);   // не реже 15 с, как в Kotlin
-        Assert.EndsWith(" (7 с назад) · циклов: 3 · OK", line);
+        var savedCharging = Device.isCharging;
+        try
+        {
+            Device.isCharging = () => false;   // батарея: интервал — ползунок, как в Kotlin
+            Assert.Equal("", StatsModel.heartbeatLine(s with { monitorEnabled = false }, new MonitorHeartbeat(), now));
+            Assert.Equal("● Проверка связи каждые 60 с · последняя: — (—) · циклов: 0 · —", StatsModel.heartbeatLine(s, new MonitorHeartbeat(), now));
+            var line = StatsModel.heartbeatLine(s with { connectionCheckIntervalSec = 5 }, new MonitorHeartbeat(true, "OK", now - 7_500, 3), now);
+            Assert.StartsWith("● Проверка связи каждые 15 с · последняя: ", line);   // не реже 15 с, как в Kotlin
+            Assert.EndsWith(" (7 с назад) · циклов: 3 · OK", line);
+            Device.isCharging = () => true;    // шнур: 10 с (решение Elyor), в экономии трафика — снова ползунок
+            Assert.StartsWith("● Проверка связи каждые 10 с (на шнуре) · последняя: ", StatsModel.heartbeatLine(s, new MonitorHeartbeat(), now));
+            Assert.StartsWith("● Проверка связи каждые 60 с · ", StatsModel.heartbeatLine(s with { trafficSaveMode = true }, new MonitorHeartbeat(), now));
+        }
+        finally { Device.isCharging = savedCharging; }
 
         MonitorLog.init(ctx);
         MonitorLog.clear(ctx);

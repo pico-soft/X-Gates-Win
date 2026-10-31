@@ -47,6 +47,26 @@ public static class XrayProxyService
     private static volatile bool wifiOnlyPaused;
     private static bool lastRunning;
     private static bool lastWifiOnly;
+    /// <summary>Только для тестов гонки стартов (находка №5): пауза в старте между «остановить прежнее» и подъёмом.</summary>
+    internal static Action<string?>? beforeCoreUpForTest;
+
+    // Находка порта №5: операции с ядром (старт/стоп/пауза) шли параллельными потоками — два почти одновременных
+    // старта («первый рабочий» → «точный топ») могли оставить поднятым НЕ последний сервер (второй видел «уже
+    // запущено»), а опоздавший старт — поднять ядро ПОСЛЕ «Стоп». Теперь каждая операция берёт номер в момент
+    // ЗАПРОСА и выполняется под одной блокировкой, только если она всё ещё последняя.
+    private static readonly object CoreOpSync = new();
+    private static long coreOpGen;
+
+    private static long newCoreOp() => Interlocked.Increment(ref coreOpGen);
+
+    private static void runCoreOp(long gen, string what, Action op)
+    {
+        lock (CoreOpSync)
+        {
+            if (gen != Interlocked.Read(ref coreOpGen)) { Log.i(TAG, $"{what}: есть более поздний запрос — пропуск"); return; }
+            op();
+        }
+    }
 
     /// <summary>Аналог onCreate: подписки на состояние (реактивный монитор, «Только Wi-Fi»). Идемпотентно.</summary>
     private static void ensureCreated(Context context)
@@ -160,7 +180,8 @@ public static class XrayProxyService
         ProxyState.update(running: false, label: label, serverKey: serverKey, message: "запуск…");
 
         coreActive = true;
-        KThread.start(() => runCoreStart(config, label, serverKey), "core-start");
+        var gen = newCoreOp();
+        KThread.start(() => runCoreStart(config, label, serverKey, gen), "core-start");
     }
 
     /**
@@ -180,6 +201,7 @@ public static class XrayProxyService
         }
         var lastAlive = LastServerStore.lastAlive(a);
         var downtimeMs = lastAlive > 0L ? JavaSystem.currentTimeMillis() - lastAlive : -1L;
+        var gen = newCoreOp();
         KThread.start(() =>
         {
             try
@@ -214,7 +236,7 @@ public static class XrayProxyService
                     boot ? "Автозапуск при входе в Windows" : "Восстанавливаюсь после сбоя",
                     boot ? $"последний сервер: {label}" : $"{downtimeStr} · сервер: {label}");
                 NotificationHelper.updateStatus(label);
-                runCoreStart(config, label, serverKey);
+                runCoreStart(config, label, serverKey, gen);
             }
             catch (Exception e)
             {
@@ -224,7 +246,10 @@ public static class XrayProxyService
     }
 
     /// <summary>Блокирующий подъём ядра (старт xray → пробы портов). Зовётся из ФОНОВОГО потока.</summary>
-    private static void runCoreStart(string config, string? label, string? serverKey)
+    private static void runCoreStart(string config, string? label, string? serverKey, long gen) =>
+        runCoreOp(gen, $"старт «{label}»", () => runCoreStartLocked(config, label, serverKey));
+
+    private static void runCoreStartLocked(string config, string? label, string? serverKey)
     {
         // Весь поток старта под перехватом: любая ошибка → сообщение + стоп, НЕ падение.
         try
@@ -236,6 +261,7 @@ public static class XrayProxyService
                 if (d != null) TrafficTracker.addTunnel(d.Value.down, d.Value.up);
                 XrayController.stop();   // авто-переключение сервера
             }
+            beforeCoreUpForTest?.Invoke(label);
             // Windows (§13.7): порт занят ДРУГОЙ программой → понятная причина вместо «ядро не запустилось».
             // Наш прежний туннель уже остановлен выше, так что занятость — чужая.
             var busy = new[] { XrayConfig.SOCKS_PORT, XrayConfig.HTTP_PORT }.Where(p => !XrayConfig.portFree(p)).ToList();
@@ -313,7 +339,8 @@ public static class XrayProxyService
         NotificationHelper.cancelNoServers(app!);
         coreActive = false;
         SystemVpnState.reset();
-        KThread.start(() =>
+        var gen = newCoreOp();
+        KThread.start(() => runCoreOp(gen, "стоп", () =>
         {
             stopTrafficPolling();
             var d = XrayController.queryTunnelDelta();   // финальный замер туннеля
@@ -322,7 +349,7 @@ public static class XrayProxyService
             TrafficTracker.onServiceStop();
             ProxyState.update(running: false, label: null, serverKey: null, message: "остановлено");
             NotificationHelper.clearStatus();
-        }, "core-stop");
+        }), "core-stop");
     }
 
     // ---- ТЗ Elyor: режим «Только Wi-Fi» (пауза на мобильной, авто-подъём на Wi-Fi) ----
@@ -358,13 +385,14 @@ public static class XrayProxyService
         TunnelHealth.reset();
         NotificationHelper.updateStatus("Пауза — жду Wi-Fi");
         ProxyState.update(running: false, label: label, serverKey: serverKey, message: "Пауза — жду Wi-Fi (мобильная сеть)", paused: true);
-        KThread.start(() =>
+        var gen = newCoreOp();
+        KThread.start(() => runCoreOp(gen, "пауза Wi-Fi", () =>
         {
             stopTrafficPolling();
             try { var d = XrayController.queryTunnelDelta(); if (d != null) TrafficTracker.addTunnel(d.Value.down, d.Value.up); } catch (Exception) { }
             try { XrayController.stop(); } catch (Exception) { }
             TrafficTracker.onServiceStop();
-        }, "wifi-only-pause");
+        }), "wifi-only-pause");
     }
 
     /// <summary>Wi-Fi вернулся (или «Только Wi-Fi» выключили) — поднять ПОСЛЕДНИЙ рабочий сервер. Монитор поднимется реактивно.</summary>
@@ -375,11 +403,12 @@ public static class XrayProxyService
         coreActive = true;
         MonitorLog.@event(app!, "net", "Только Wi-Fi: возобновление", "сеть не мобильная — поднимаю последний сервер");
         ProxyState.update(running: false, label: null, serverKey: null, message: "возобновление (Wi-Fi)…", paused: false);
-        KThread.start(resumeLastServerBlocking, "wifi-only-resume");
+        var gen = newCoreOp();
+        KThread.start(() => resumeLastServerBlocking(gen), "wifi-only-resume");
     }
 
     /// <summary>Блокирующий подъём последнего сервера при возобновлении (как restart, но без оценки простоя).</summary>
-    private static void resumeLastServerBlocking()
+    private static void resumeLastServerBlocking(long gen)
     {
         var a = app!;
         try
@@ -403,7 +432,7 @@ public static class XrayProxyService
             var label = ServerLabels.full(profile);
             var serverKey = SubscriptionManager.serverKey(profile);
             NotificationHelper.updateStatus(label);
-            runCoreStart(config, label, serverKey);
+            runCoreStart(config, label, serverKey, gen);
         }
         catch (Exception e)
         {
@@ -453,6 +482,7 @@ public static class XrayProxyService
     /// <summary>Аналог onDestroy (выход из приложения): погасить монитор, опрос и ядро. Без «сирот» xray.exe.</summary>
     public static void shutdown()
     {
+        newCoreOp();   // опоздавшие старты/стоп после выхода не выполняются (блокировку не ждём — как onDestroy Android)
         stopTrafficPolling();
         coreActive = false;
         SystemVpnState.reset();

@@ -103,6 +103,9 @@ vmess = [
     "VMESS://" + b64(json.dumps(vd)),
     "vmess://﻿" + b64(json.dumps(vd)),
     "vmess://" + b64("﻿" + json.dumps({**vd, "ps": "bom-inside"})),
+    # Находка порта №2: base64 с паддингом + «?хвост» без & (~1.5% реальных ссылок) — раньше сервер отбрасывался.
+    vm({**vd, "ps": "tail-after-padding"}) + "?remarks=tail",
+    vm({**vd, "ps": "tail-no-padding"}, pad=False) + "?ed=2048",
 ]
 ss = [
     "ss://" + b64("aes-256-gcm:pass123", urlsafe=True, pad=False) + "@example.com:8388#ss-sip002-b64",

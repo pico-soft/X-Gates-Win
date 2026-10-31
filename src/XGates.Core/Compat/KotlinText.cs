@@ -60,6 +60,13 @@ internal static class KotlinText
     public static string RemovePrefix(this string s, string prefix) =>
         s.StartsWith(prefix, StringComparison.Ordinal) ? s.Substring(prefix.Length) : s;
 
+    /// <summary>Kotlin <c>substringBefore(char)</c>: до первого вхождения; нет вхождения — вся строка.</summary>
+    public static string SubstringBefore(this string s, char delimiter)
+    {
+        var i = s.IndexOf(delimiter);
+        return i < 0 ? s : s.Substring(0, i);
+    }
+
     /// <summary>Kotlin <c>removeSuffix</c> (с учётом регистра).</summary>
     public static string RemoveSuffix(this string s, string suffix) =>
         s.EndsWith(suffix, StringComparison.Ordinal) ? s.Substring(0, s.Length - suffix.Length) : s;

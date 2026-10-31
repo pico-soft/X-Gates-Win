@@ -22,11 +22,14 @@ public static class VmessParser
 
         // Детект query-формата (vmess-std) по наличию ? и & — откладываем, не крашим.
         if (body.Contains('?') && body.Contains('&')) return null;
+        // Находка порта №2: ~1.5% реальных ссылок — `vmess://<base64>=?хвост` (без &): хвост ломал Base64 и сервер
+        // отбрасывался. Base64-часть — до «?», хвост не нужен (имя — в "ps" JSON).
+        var b64 = body.SubstringBefore('?');
 
         string json;
         try
         {
-            var padded = body + "=".Repeat((4 - body.Length % 4) % 4); // паддинг до кратности 4
+            var padded = b64 + "=".Repeat((4 - b64.Length % 4) % 4); // паддинг до кратности 4
             json = Encoding.UTF8.GetString(AndroidBase64.Decode(padded, AndroidBase64.DEFAULT));
         }
         catch (Exception)

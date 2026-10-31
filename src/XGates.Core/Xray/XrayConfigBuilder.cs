@@ -18,9 +18,9 @@ public static class XrayConfigBuilder
     // Транспорты, которые собираем И которые умеет наше ядро (проверено по бинарю AAR, xray-core v26.x:
     // rawSettings/xhttpSettings/httpupgradeSettings/kcpSettings присутствуют). quic ядром НЕ поддержан (нет пакета).
     //  • raw   — новое имя tcp (нормализуем raw→tcp);
-    //  • xhttp — новое имя splithttp (ядро принимает оба имени + xhttpSettings);
+    //  • xhttp — новое имя splithttp (нормализуем splithttp→xhttp: иначе xhttpSettings не пишутся и path теряется);
     //  • kcp/mkcp — одно и то же (нормализуем kcp→mkcp).
-    private static readonly HashSet<string> SUPPORTED_NETWORKS = ["tcp", "raw", "ws", "grpc", "xhttp", "httpupgrade", "kcp", "mkcp"];
+    private static readonly HashSet<string> SUPPORTED_NETWORKS = ["tcp", "raw", "ws", "grpc", "xhttp", "splithttp", "httpupgrade", "kcp", "mkcp"];
 
     /// <summary>Боевой конфиг: общий inbound (socks 10815 + http 10816) + outbound сервера.</summary>
     public static string build(ServerProfile p) => $$"""
@@ -165,10 +165,11 @@ public static class XrayConfigBuilder
 
     private static string streamSettings(ServerProfile p)
     {
-        // Нормализация имён-синонимов транспорта: raw→tcp (raw = переименованный tcp), kcp→mkcp.
+        // Нормализация имён-синонимов транспорта: raw→tcp (raw = переименованный tcp), splithttp→xhttp, kcp→mkcp.
         var net = p.network switch
         {
             "raw" => "tcp",
+            "splithttp" => "xhttp",
             "kcp" => "mkcp",
             _ => p.network,
         };

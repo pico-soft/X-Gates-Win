@@ -44,4 +44,21 @@ public class SanitizerTest
         Assert.Contains("SM-S908E", clean);
         Assert.Contains("Android 14", clean);
     }
+
+    [Fact]
+    public void keeps_exception_and_method_names_but_masks_keys()
+    {
+        // Находка порта №6: имена исключений/методов ≥24 букв раньше превращались в «<токен>».
+        var raw = "java.lang.IllegalArgumentException: Cannot coerce value\n" +
+                  "java.util.ConcurrentModificationException\n" +
+                  "    at com.picosoft.xrayproxydroid.monitor.NetworkMonitor.rebuildAndRateTopWithFallback(NetworkMonitor.kt:1374)\n" +
+                  "pbk=SxYzKz3vV9nGq0rUe8yH2bJk5mWp7tLc4aDfRhNs1Eo hex=0123456789abcdef0123456789abcdef";
+        var clean = Sanitizer.clean(raw);
+        Assert.Contains("IllegalArgumentException", clean);
+        Assert.Contains("ConcurrentModificationException", clean);
+        Assert.Contains("rebuildAndRateTopWithFallback", clean);
+        Assert.DoesNotContain("SxYzKz3vV9nGq0rUe8yH2bJk5mWp7tLc4aDfRhNs1Eo", clean);   // ключ reality (base64)
+        Assert.DoesNotContain("0123456789abcdef0123456789abcdef", clean);              // hex
+        Assert.Equal(2, clean.Split("<токен>").Length - 1);
+    }
 }

@@ -208,7 +208,10 @@ public static partial class Sanitizer
         s = Creds().Replace(s, "<логин>@");
         s = Uuid().Replace(s, "<uuid>");
         s = Ip().Replace(s, "<ip>");
-        s = Token().Replace(s, "<токен>");
+        // Находка порта №6: слово ТОЛЬКО из латинских букв — имя исключения/метода (IllegalArgumentException,
+        // rebuildAndRateTop), его не маскируем: иначе отчёт теряет главное — ЧТО упало. Ключи/base64/hex почти
+        // всегда содержат цифры или +/=_- (24 случайных символа base64 без них — ~0,7%).
+        s = Token().Replace(s, m => m.Value.All(char.IsAsciiLetter) ? m.Value : "<токен>");
         return s;
     }
 }
