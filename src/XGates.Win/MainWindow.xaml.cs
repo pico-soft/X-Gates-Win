@@ -386,6 +386,8 @@ public partial class MainWindow : Window
         SocksPort.Text = w.socksPort.ToString();
         HttpPort.Text = w.httpPort.ToString();
         HowToText.Text = howTo(w.socksPort, w.httpPort);
+        FirefoxStatus.Text = FirefoxSetup.statusText(ctx, w.socksPort);
+        FirefoxStatus.Foreground = (Brush)FindResource("Gray");
         var s = SettingsStore.current();
         try { LaunchAtLogin.IsChecked = Autostart.isEnabled(); } catch (Exception) { LaunchAtLogin.IsChecked = false; }
         ProtocolsPanel.Children.Clear();
@@ -510,7 +512,7 @@ public partial class MainWindow : Window
             OptimizePanel.Children.Add(topCost);
         }
         else OptimizePanel.Children.Add(small(OptimizeBlock.OFF_HINT));
-        slider("Проверка связи (оба режима)", OptimizeBlock.CHK_LABELS, OptimizeBlock.checkIndex(s), OptimizeBlock.pickCheck);
+        slider("Проверка связи на батарее (на шнуре — каждые 10 с)", OptimizeBlock.CHK_LABELS, OptimizeBlock.checkIndex(s), OptimizeBlock.pickCheck);
         OptimizePanel.Children.Add(checkCost);
         OptimizePanel.Children.Add(total);
     }
@@ -575,7 +577,8 @@ public partial class MainWindow : Window
     /// <summary>Инструкции (текст можно выделить и скопировать). Порты — текущие.</summary>
     private static string howTo(int socks, int http) =>
         $"""
-        Firefox: Настройки → Основные → Параметры сети → «Настроить…» → «Ручная настройка прокси»:
+        Firefox: проще всего — кнопка «Настроить Firefox» выше (и «Вернуть как было», чтобы снять).
+          Вручную: Настройки → Основные → Параметры сети → «Настроить…» → «Ручная настройка прокси»:
           узел SOCKS 127.0.0.1, порт {socks}, SOCKS 5, ☑ «Отправлять DNS-запросы через прокси при использовании SOCKS 5».
           Остальные поля пустые. Проверка: откройте 2ip.ru — адрес и страна должны быть зарубежными.
 
@@ -678,6 +681,11 @@ public partial class MainWindow : Window
         WinSettingsStore.update(ctx, new WinSettings { socksPort = socks, httpPort = http });
         PortsStatus.Foreground = Brushes.DarkGreen;
         PortsStatus.Text = $"Сохранено: SOCKS5 127.0.0.1:{socks}, HTTP 127.0.0.1:{http}";
+        HowToText.Text = howTo(socks, http);
+        // Firefox настроен нами — его блок прокси тоже на новый порт (вступит после перезапуска Firefox).
+        try { if (FirefoxSetup.refreshPort(ctx, socks) is { ok: true }) PortsStatus.Text += " · Firefox: перезапустите его, чтобы взять новый порт"; }
+        catch (Exception ex) { PortsStatus.Text += $" · Firefox не обновлён: {ex.Message}"; }
+        FirefoxStatus.Text = FirefoxSetup.statusText(ctx, socks);
         // Работающий туннель слушает старые порты → переподнять тот же сервер на новых.
         var p = ProxyState.state.value;
         if (p.running && p.serverKey != null && SubscriptionManager.allServers(ctx).FirstOrDefault(x => SubscriptionManager.serverKey(x) == p.serverKey) is { } cur)
@@ -685,6 +693,20 @@ public partial class MainWindow : Window
             main.connectServer(cur, "смена портов");
             PortsStatus.Text += " · прокси перезапущен на новых портах";
         }
+    }
+
+    private void OnFirefoxSetup(object sender, RoutedEventArgs e) =>
+        showFirefox(() => FirefoxSetup.configure(ctx, WinSettingsStore.current().socksPort));
+
+    private void OnFirefoxRestore(object sender, RoutedEventArgs e) => showFirefox(() => FirefoxSetup.restore(ctx));
+
+    private void showFirefox(Func<FirefoxSetup.Outcome> action)
+    {
+        FirefoxSetup.Outcome r;
+        try { r = action(); }
+        catch (Exception ex) { r = new FirefoxSetup.Outcome(false, $"Не получилось: {ex.Message}"); }
+        FirefoxStatus.Text = r.text;
+        FirefoxStatus.Foreground = r.ok ? Brushes.DarkGreen : Brushes.Firebrick;
     }
 
     private void OnCopySocks(object sender, RoutedEventArgs e) => copy($"127.0.0.1:{WinSettingsStore.current().socksPort}");

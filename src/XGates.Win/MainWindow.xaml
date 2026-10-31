@@ -243,6 +243,13 @@
                         <Button Content="По умолчанию (10815 / 10816)" Click="OnDefaultPorts" />
                     </WrapPanel>
                     <TextBlock x:Name="PortsStatus" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <!-- Рабочий браузер — Firefox (решение Elyor): прокси в его обычный профиль одной кнопкой (FirefoxSetup). -->
+                    <TextBlock Style="{StaticResource Section}" Margin="0,10,0,6" Text="Firefox" />
+                    <WrapPanel>
+                        <Button Content="Настроить Firefox" Click="OnFirefoxSetup" />
+                        <Button Content="Вернуть как было" Click="OnFirefoxRestore" />
+                    </WrapPanel>
+                    <TextBlock x:Name="FirefoxStatus" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{StaticResource Gray}" />
                     <!-- Как направить программы в наш прокси (аналог BrowserSetupSection Android). Системный прокси НЕ трогаем. -->
                     <Expander Header="Как подключить браузер и Telegram" Margin="0,8,0,0" FontWeight="Bold">
                         <TextBox x:Name="HowToText" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent"
