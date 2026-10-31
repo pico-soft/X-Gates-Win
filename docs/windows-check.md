@@ -8,7 +8,7 @@
 1. **Собрать на ноутбуке** (нужны git и .NET SDK 10, права администратора не нужны):
    `git clone https://github.com/pico-soft/X-Gates-Win` → `git checkout wip/windows-shell` →
    `powershell -ExecutionPolicy Bypass -File tools\windows\check.ps1`.
-2. **GitHub Actions** (`tools/ci/windows.yml`; включается копированием в `.github/workflows/`; ручной запуск): собирает, гоняет тесты на Windows,
+2. **GitHub Actions** (`.github/workflows/windows.yml`; ручной запуск или push в ветку `ci-check`): собирает, гоняет тесты на Windows,
    запускает окно и снимает скриншоты, собирает и ставит/удаляет MSI. Чтобы КК мог отправить этот файл, токену `gh`
    на сервере нужно право `workflow`: `! gh auth refresh -h github.com -s workflow` (решение Elyor: тратит минуты
    Actions приватного репозитория — один прогон ≈ 10–15 мин, у Windows-раннера множитель ×2).
