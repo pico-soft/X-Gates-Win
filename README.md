@@ -92,7 +92,6 @@ dotnet publish src/XGates.Win -c Release -r win-x64 --self-contained   # про�
 
 ## Лицензия
 
-[MIT](LICENSE) — на всё в репозитории, кроме каталога `app/` (Kotlin-эталон для сверочных тестов): на него
-лицензия MIT не распространяется. Сторонние компоненты — под своими лицензиями: Xray-core (MPL-2.0; для Windows скачивается при
+[MIT](LICENSE). Сторонние компоненты — под своими лицензиями: Xray-core (MPL-2.0; для Windows скачивается при
 сборке), библиотека `app/libs/libv2ray.aar` (AndroidLibXrayLite), файлы AOSP в `tools/golden/aosp`
 (Apache-2.0, только для тестов).
