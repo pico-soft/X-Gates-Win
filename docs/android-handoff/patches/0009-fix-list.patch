@@ -1,0 +1,67 @@
+From 0e79c958a1dae42bd2f336f1163da55d601fa0fa Mon Sep 17 00:00:00 2001
+From: PICO-SOFT <pico.soft.github@gmail.com>
+Date: Sat, 31 Oct 2026 00:29:27 +0000
+Subject: [PATCH] =?UTF-8?q?fix(list):=20=D0=BE=D0=B4=D0=BD=D0=BE=D0=B8?=
+ =?UTF-8?q?=D0=BC=D1=91=D0=BD=D0=BD=D1=8B=D0=B5=20=D1=81=D0=B5=D1=80=D0=B2?=
+ =?UTF-8?q?=D0=B5=D1=80=D1=8B=20=D1=81=20=D0=BE=D0=B4=D0=B8=D0=BD=D0=B0?=
+ =?UTF-8?q?=D0=BA=D0=BE=D0=B2=D1=8B=D0=BC=20=D0=BF=D1=80=D0=BE=D1=82=D0=BE?=
+ =?UTF-8?q?=D0=BA=D0=BE=D0=BB=D0=BE=D0=BC=20=D0=B1=D1=8B=D0=BB=D0=B8=20?=
+ =?UTF-8?q?=D0=BD=D0=B5=D0=BE=D1=82=D0=BB=D0=B8=D1=87=D0=B8=D0=BC=D1=8B=20?=
+ =?UTF-8?q?=E2=80=94=20=D0=BF=D0=BE=D0=B4=D0=BF=D0=B8=D1=81=D1=8C=20=C2=AB?=
+ =?UTF-8?q?=E2=80=A6=20=C2=B7=20||||=C2=BB?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+buildDiscriminators: при совпадении подписи «протокол · network · security» «гарантией уникальности» были последние
+4 символа serverKey, но ключ кончается пустыми полями (…|tcp||||||) → у одноимённых серверов подпись одинаковая
+«… · ||||», строки неотличимы, нужный выбрать нельзя. Теперь — адрес:порт (IPv6 в скобках); совпал и он
+(тот же хост с разным путём/ключом) — «#» + 4 hex от String.hashCode ключа (стабильно между запусками).
+
+Найдено при порте на Windows (X-Gates-Win, docs/decisions.md «Найдено в Android-коде» №9); там проверено тестом
+той же логики (C#), включая известные значения String.hashCode («Aa» → 0840).
+---
+ .../com/picosoft/xrayproxydroid/MainActivity.kt   | 15 +++++++++++++--
+ 1 file changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/app/src/main/java/com/picosoft/xrayproxydroid/MainActivity.kt b/app/src/main/java/com/picosoft/xrayproxydroid/MainActivity.kt
+index a43577f..60a642d 100644
+--- a/app/src/main/java/com/picosoft/xrayproxydroid/MainActivity.kt
++++ b/app/src/main/java/com/picosoft/xrayproxydroid/MainActivity.kt
+@@ -848,7 +848,7 @@ private fun protoNetSec(p: ServerProfile): String =
+ /**
+  * Подпись-дискриминатор для ОДИНАКОВЫХ имён (иначе строки визуально неотличимы, выбрать нельзя).
+  * Возвращает serverKey → «протокол · network · security». Только для имён, встречающихся >1 раза.
+- * Если и эта подпись совпала внутри группы — добавляем последние 4 символа serverKey (гарантия уникальности).
++ * Если и эта подпись совпала внутри группы — добавляем адрес:порт (совпал и он — «#» + 4 hex хэша ключа).
+  * Уникальные имена в map не попадают.
+  */
+ private fun buildDiscriminators(servers: List<ServerProfile>, bl: Blocklist): Map<String, String> {
+@@ -860,12 +860,23 @@ private fun buildDiscriminators(servers: List<ServerProfile>, bl: Blocklist): Ma
+         val ambiguous = group.map(::protoNetSec).toSet().size < group.size
+         for (p in group) {
+             val key = SubscriptionManager.serverKey(p)
+-            result[key] = if (ambiguous) "${protoNetSec(p)} · ${key.takeLast(4)}" else protoNetSec(p)
++            if (!ambiguous) { result[key] = protoNetSec(p); continue }
++            // Находка порта Windows №9: раньше «гарантией» были 4 последних символа ключа, а ключ кончается пустыми
++            // полями («…|tcp||||||») → у одноимённых подпись «… · ||||», строки неотличимы. Теперь — адрес:порт;
++            // совпал и он — «#» + 4 hex хэша ключа.
++            val sameAddr = group.count { protoNetSec(it) == protoNetSec(p) && hostPort(it) == hostPort(p) } > 1
++            result[key] = "${protoNetSec(p)} · ${hostPort(p)}" + if (sameAddr) " · #${keyTag(key)}" else ""
+         }
+     }
+     return result
+ }
+ 
++/** адрес:порт для подписи (IPv6 — в скобках, как в ссылках). */
++private fun hostPort(p: ServerProfile): String = (if (':' in p.address) "[${p.address}]" else p.address) + ":" + p.port
++
++/** 4 hex от String.hashCode ключа — стабильно между запусками (и одинаково с Windows-версией). */
++private fun keyTag(key: String): String = "%08x".format(key.hashCode()).takeLast(4)
++
+ // Промпт 123.E: давность пинга/замера в списке (в МИНУТАХ/часах — как удобнее) — «24 Мбит/с минутной давности»
+ // ≠ «двухдневной». Показываем ДВЕ отдельные метки: слева «пинг NNN мс · N мин» (когда пинговали), справа
+ // скорость + «N мин» (когда мерили) — чтобы видеть и свежесть пинга, и свежесть замера отдельно (ТЗ Elyor).
+-- 
+2.43.0
+

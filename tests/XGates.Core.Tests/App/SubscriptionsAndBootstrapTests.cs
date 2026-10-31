@@ -115,18 +115,25 @@ public sealed class SubscriptionsAndBootstrapTests : IDisposable
         var ts = DateTime.Now.AddMinutes(-5).ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
         Assert.Equal("5 мин назад", UiFormat.speedAgeText(ts + ":56"));   // нестрогий разбор, как SimpleDateFormat
 
-        // Одинаковые имена различаются подписью; совпала и подпись → хвост ключа.
+        // Одинаковые имена различаются подписью; совпала и подпись → адрес:порт; совпал и он → «#» + хэш ключа.
         var a = VlessParser.parse($"vless://{LocalTestNet.Uuid}@1.1.1.1:443?type=ws#Same")!;
         var b = VlessParser.parse($"vless://{LocalTestNet.Uuid}@1.1.1.2:443?type=tcp#Same")!;
         var c = VlessParser.parse($"vless://{LocalTestNet.Uuid}@1.1.1.3:443?type=tcp#Same")!;
+        var e1 = VlessParser.parse($"vless://{LocalTestNet.Uuid}@[2001:db8::5]:8443?type=tcp&path=%2Fa#Same")!;
+        var e2 = VlessParser.parse($"vless://{LocalTestNet.Uuid}@[2001:db8::5]:8443?type=tcp&path=%2Fb#Same")!;
         var u = VlessParser.parse($"vless://{LocalTestNet.Uuid}@1.1.1.4:443?type=tcp#Unique")!;
-        var d = UiFormat.buildDiscriminators([a, b, c, u], new Blocklist());
+        var d = UiFormat.buildDiscriminators([a, b, c, e1, e2, u], new Blocklist());
         Assert.False(d.ContainsKey(SubscriptionManager.serverKey(u)));
-        Assert.StartsWith("VLESS · ws · none · ", d[SubscriptionManager.serverKey(a)]);
-        // ПАРИТЕТ: «хвост ключа» — последние 4 символа serverKey, а у большинства ключей это пустые поля «||||» →
-        // подписи совпадают (docs/decisions.md, «Найдено в Android-коде» №9).
-        Assert.Equal("VLESS · tcp · none · ||||", d[SubscriptionManager.serverKey(b)]);
-        Assert.Equal(d[SubscriptionManager.serverKey(b)], d[SubscriptionManager.serverKey(c)]);
+        Assert.Equal("VLESS · ws · none · 1.1.1.1:443", d[SubscriptionManager.serverKey(a)]);
+        // Находка порта №9 (исправлено): раньше у b и c было одинаковое «VLESS · tcp · none · ||||».
+        Assert.Equal("VLESS · tcp · none · 1.1.1.2:443", d[SubscriptionManager.serverKey(b)]);
+        Assert.Equal("VLESS · tcp · none · 1.1.1.3:443", d[SubscriptionManager.serverKey(c)]);
+        Assert.StartsWith("VLESS · tcp · none · [2001:db8::5]:8443 · #", d[SubscriptionManager.serverKey(e1)]);
+        Assert.NotEqual(d[SubscriptionManager.serverKey(e1)], d[SubscriptionManager.serverKey(e2)]);
+        Assert.Equal(5, d.Values.Distinct().Count());   // все пять одноимённых подписей разные (u — без подписи)
+        // Хэш — Java String.hashCode (одинаково с Android и между запусками): известные значения Java.
+        Assert.Equal("0840", UiFormat.keyTag("Aa"));                    // "Aa".hashCode() == 2112
+        Assert.Equal("0000", UiFormat.keyTag("polygenelubricants"));    // == Integer.MIN_VALUE (0x80000000)
     }
 
     [Fact]

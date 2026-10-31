@@ -23,8 +23,10 @@ public static class UiFormat
     public static string protoNetSec(ServerProfile p) => $"{p.protocol} · {p.network} · {normalizeStreamSecurity(p.security)}";
 
     /// <summary>
-    /// Подпись-дискриминатор для ОДИНАКОВЫХ имён: serverKey → «протокол · network · security» (+ 4 последних символа
-    /// ключа, если и подпись совпала). Уникальные имена в словарь не попадают.
+    /// Подпись-дискриминатор для ОДИНАКОВЫХ имён: serverKey → «протокол · network · security»; совпала и подпись →
+    /// + адрес:порт; совпал и он → + «#» и 4 hex хэша ключа. Уникальные имена в словарь не попадают.
+    /// Находка порта №9: раньше «гарантией» были 4 последних символа ключа, а ключ кончается пустыми полями
+    /// («…|tcp||||||») → у одноимённых серверов подпись «… · ||||», строки неотличимы.
     /// </summary>
     public static Dictionary<string, string> buildDiscriminators(IReadOnlyList<ServerProfile> servers, Blocklist bl)
     {
@@ -37,10 +39,23 @@ public static class UiFormat
             foreach (var p in g)
             {
                 var key = SubscriptionManager.serverKey(p);
-                result[key] = ambiguous ? $"{protoNetSec(p)} · {key[Math.Max(0, key.Length - 4)..]}" : protoNetSec(p);
+                if (!ambiguous) { result[key] = protoNetSec(p); continue; }
+                var sameAddr = g.Count(it => protoNetSec(it) == protoNetSec(p) && hostPort(it) == hostPort(p)) > 1;
+                result[key] = $"{protoNetSec(p)} · {hostPort(p)}" + (sameAddr ? $" · #{keyTag(key)}" : "");
             }
         }
         return result;
+    }
+
+    /// <summary>адрес:порт для подписи (IPv6 — в скобках, как в ссылках).</summary>
+    public static string hostPort(ServerProfile p) => (p.address.Contains(':') ? $"[{p.address}]" : p.address) + ":" + p.port;
+
+    /// <summary>4 hex от Java String.hashCode ключа — стабильно между запусками и одинаково с Android.</summary>
+    internal static string keyTag(string key)
+    {
+        var h = 0;
+        foreach (var ch in key) h = unchecked(31 * h + ch);
+        return ((uint)h).ToString("x8")[4..];
     }
 
     public static string speedAgeTextMs(long t)
