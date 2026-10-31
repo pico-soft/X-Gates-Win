@@ -89,7 +89,9 @@ public sealed class CascadeFetchIntegrationTests : IDisposable
     public void Unreachable_direct_gives_java_like_exception_class()
     {
         int dead = LocalTestNet.FreePort();
-        var r = SubscriptionFetcher.fetch($"http://127.0.0.1:{dead}/x", "ua", 2000);
+        // Таймаут с запасом: Windows на отказ (RST) повторяет попытку соединения и отвечает «отказано» только через ~2 с —
+        // при таймауте 2 с это выглядело таймаутом (первый прогон на Windows 2026-10-31).
+        var r = SubscriptionFetcher.fetch($"http://127.0.0.1:{dead}/x", "ua", 10_000);
         Assert.False(r.ok);
         Assert.Equal(-1, r.httpCode);
         Assert.Equal("ConnectException", r.exceptionClass);
