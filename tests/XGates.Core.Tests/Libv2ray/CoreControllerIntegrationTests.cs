@@ -25,14 +25,14 @@ public sealed class CoreControllerIntegrationTests : IDisposable
         try { using var c = new TcpClient(); c.Connect(IPAddress.Loopback, port); return true; } catch (SocketException) { return false; }
     }
 
-    private static HttpClient ViaSocks(int port) =>
+    internal static HttpClient ViaSocks(int port) =>
         new(new SocketsHttpHandler { Proxy = new WebProxy($"socks5://127.0.0.1:{port}"), UseProxy = true }) { Timeout = TimeSpan.FromSeconds(10) };
 
     private static HttpClient ViaHttpProxy(int port) =>
         new(new SocketsHttpHandler { Proxy = new WebProxy($"http://127.0.0.1:{port}"), UseProxy = true }) { Timeout = TimeSpan.FromSeconds(10) };
 
     /// <summary>Боевой конфиг XrayConfigBuilder.build с портами 10815/10816, подменёнными на свободные (только в тесте).</summary>
-    private static (string cfg, int socks, int http) BuildOnFreePorts(ServerProfile p)
+    internal static (string cfg, int socks, int http) BuildOnFreePorts(ServerProfile p)
     {
         var cfg = JsonNode.Parse(XrayConfigBuilder.build(p))!.AsObject();
         int socks = LocalTestNet.FreePort(), http = LocalTestNet.FreePort();

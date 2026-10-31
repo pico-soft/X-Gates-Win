@@ -117,11 +117,13 @@ public static class JsonConfigParser
             alpn = string.Join(",", parts).IfBlankNull();
         }
         var allowInsecure = tls?.optBoolean("allowInsecure", false) ?? false;
+        var pinnedPeerCertSha256 = tls?.optString("pinnedPeerCertSha256").IfBlankNull();
+        var verifyPeerCertByName = tls?.optString("verifyPeerCertByName").IfBlankNull();
         var publicKey = reality?.optString("publicKey").IfBlankNull();
         var shortId = reality?.optString("shortId").IfBlankNull();
         var spiderX = reality?.optString("spiderX").IfBlankNull();
 
-        string? path = null, hostHeader = null, serviceName = null, headerType = null, mode = null, seed = null;
+        string? path = null, hostHeader = null, serviceName = null, headerType = null, mode = null, seed = null, xhttpExtra = null;
         switch (network)
         {
             case "ws":
@@ -143,6 +145,8 @@ public static class JsonConfigParser
                 {
                     path = x.optString("path").IfBlankNull(); hostHeader = x.optString("host").IfBlankNull();
                     mode = x.optString("mode").IfBlankNull();
+                    // Как в ядре: при extra остальные поля xhttpSettings (кроме host/path/mode) не действуют.
+                    xhttpExtra = XhttpExtra.sanitize((x.optJSONObject("extra") ?? x).ToString());
                 }
                 break;
             case "grpc":
@@ -185,12 +189,15 @@ public static class JsonConfigParser
             fingerprint = fingerprint,
             alpn = alpn,
             allowInsecure = allowInsecure,
+            pinnedPeerCertSha256 = pinnedPeerCertSha256,
+            verifyPeerCertByName = verifyPeerCertByName,
             network = network,
             path = path,
             hostHeader = hostHeader,
             serviceName = serviceName,
             headerType = headerType,
             mode = mode,
+            xhttpExtra = xhttpExtra,
             seed = seed,
             publicKey = publicKey,
             shortId = shortId,

@@ -25,6 +25,24 @@ public static class ServerProfileKt
         "reality" => "reality",
         _ => "none",
     };
+
+    /// <summary>
+    /// pcs для tlsSettings.pinnedPeerCertSha256: SHA-256 через запятую, можно в формате OpenSSL (AA:BB:…).
+    /// Значение не той длины или не hex ядро отвергает вместе с конфигом, поэтому такие выбрасываем: без pin
+    /// сертификат проверяется как обычно, а сервер не пропадает из-за опечатки в подписке. null — годных нет.
+    /// </summary>
+    public static string? normalizePinnedCerts(string? raw)
+    {
+        if (raw == null) return null;
+        var pins = raw.Split(',').Select(it => it.KTrim()).Where(isSha256Hex).ToList();
+        return pins.Count > 0 ? string.Join(",", pins) : null;
+    }
+
+    private static bool isSha256Hex(string pin)
+    {
+        var hex = pin.Replace(":", "");
+        return hex.Length == 64 && hex.All(Uri.IsHexDigit);
+    }
 }
 
 /// <summary>
@@ -58,7 +76,10 @@ public sealed record ServerProfile
     [JsonPropertyName("sni")] public string? sni { get; init; }
     [JsonPropertyName("fingerprint")] public string? fingerprint { get; init; }
     [JsonPropertyName("alpn")] public string? alpn { get; init; }
-    [JsonPropertyName("allowInsecure")] public bool allowInsecure { get; init; }
+    [JsonPropertyName("allowInsecure")] public bool allowInsecure { get; init; }  // только из ссылки: в конфиг не идёт, ядро v26 его убрало
+    // Замена allowInsecure в ядре v26: ключи pcs/vcn ссылки. Пустые не сериализуем: профиль и golden остаются как у Android.
+    [JsonPropertyName("pinnedPeerCertSha256"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? pinnedPeerCertSha256 { get; init; }
+    [JsonPropertyName("verifyPeerCertByName"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? verifyPeerCertByName { get; init; }
 
     // --- транспорт ---
     [JsonPropertyName("network")] public string network { get; init; } = "tcp";       // tcp | raw(=tcp) | ws | grpc | xhttp | httpupgrade | kcp/mkcp
@@ -67,6 +88,7 @@ public sealed record ServerProfile
     [JsonPropertyName("serviceName")] public string? serviceName { get; init; }   // grpc
     [JsonPropertyName("headerType")] public string? headerType { get; init; }    // tcp http-header; mkcp тип обфускации заголовка (none/srtp/utp/…)
     [JsonPropertyName("mode")] public string? mode { get; init; }          // xhttp mode (auto/packet-up/stream-up/stream-one); пусто → ядро auto
+    [JsonPropertyName("xhttpExtra"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? xhttpExtra { get; init; }   // xhttpSettings.extra, см. XhttpExtra
     [JsonPropertyName("seed")] public string? seed { get; init; }          // mkcp seed (обфускация)
 
     // --- reality ---
