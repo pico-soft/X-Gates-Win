@@ -1461,9 +1461,9 @@ public static class NetworkMonitor
             var needMeasure = list2.Concat(fillPool).DistinctBy(key).ToList();   // список 2 — приоритет, затем добор
             // ТЗ Elyor: фон «так же ищет до 10 живых» (как ручной «Самый быстрый»). Потолок БОЛЬШОЙ (180) — долгосрочно
             // дешевле: сходится к 10 живых, а не крутит 60 вхолостую. Экономия — 30.
-            // ⚠️ Паритет с Kotlin: при needMeasure < targetTop coerceIn бросает (пустой диапазон) → фон-рейтинг уходит в
-            // «Ошибка фон-рейтинга топа» и ничего не мерит. Кандидат на исправление в ОБЕИХ версиях (docs/decisions.md).
-            var maxScan = (s.trafficSaveMode ? 30 : 180).coerceIn(targetTop, needMeasure.Count);
+            // Нижняя граница — не больше размера пула: на малом пуле (needMeasure < targetTop) coerceIn(targetTop, size)
+            // бросал «empty range» → фон-рейтинг ничего не мерил (находка порта №3, исправлено в обеих версиях).
+            var maxScan = (s.trafficSaveMode ? 30 : 180).coerceIn(Math.Min(targetTop, needMeasure.Count), needMeasure.Count);
             // Этап А: МИНИМАЛЬНЫЙ замер (~100 КБ, 1 пробник/3с) от списка 2 к добору; СТОП при наборе needTop годных ИЛИ
             // maxScan. На tcping-пуле из сотен это ключ к «не 5 ГБ/сут»: мерим горстку, а не всё.
             var minimalByKey = new Dictionary<string, double>();

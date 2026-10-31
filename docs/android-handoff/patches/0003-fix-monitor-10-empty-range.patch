@@ -1,0 +1,42 @@
+From 9a2dca5ef7055ea7465fc033fb44598028870b61 Mon Sep 17 00:00:00 2001
+From: PICO-SOFT <pico.soft.github@gmail.com>
+Date: Sat, 31 Oct 2026 00:07:14 +0000
+Subject: [PATCH] =?UTF-8?q?fix(monitor):=20=D1=84=D0=BE=D0=BD=D0=BE=D0=B2?=
+ =?UTF-8?q?=D1=8B=D0=B9=20=D1=80=D0=B5=D0=B9=D1=82=D0=B8=D0=BD=D0=B3=20?=
+ =?UTF-8?q?=D1=82=D0=BE=D0=BF=D0=B0=20=D0=BF=D0=B0=D0=B4=D0=B0=D0=BB=20?=
+ =?UTF-8?q?=D0=BD=D0=B0=20=D0=BF=D1=83=D0=BB=D0=B5=20=D0=BC=D0=B5=D0=BD?=
+ =?UTF-8?q?=D1=8C=D1=88=D0=B5=2010=20=D1=81=D0=B5=D1=80=D0=B2=D0=B5=D1=80?=
+ =?UTF-8?q?=D0=BE=D0=B2=20=E2=80=94=20=C2=ABempty=20range=C2=BB?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+rebuildAndRateTop: maxScan = base.coerceIn(targetTop, needMeasure.size) — при needMeasure.size < targetTop
+(малый пул, частый случай: несколько подписок по 2–8 серверов) диапазон пустой → IllegalArgumentException
+«Cannot coerce value to an empty range: maximum N is less than minimum 10» → в журнале «Ошибка фон-рейтинга
+топа», фоновый рейтинг ничего не мерил. Теперь нижняя граница — minOf(targetTop, size).
+
+Найдено при порте на Windows (X-Gates-Win, docs/decisions.md «Найдено в Android-коде» №3); там воспроизведено
+живым монитором на стенде (3 сервера) и проверено после правки.
+---
+ .../com/picosoft/xrayproxydroid/monitor/NetworkMonitor.kt     | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/app/src/main/java/com/picosoft/xrayproxydroid/monitor/NetworkMonitor.kt b/app/src/main/java/com/picosoft/xrayproxydroid/monitor/NetworkMonitor.kt
+index 803b81f..de3c35b 100644
+--- a/app/src/main/java/com/picosoft/xrayproxydroid/monitor/NetworkMonitor.kt
++++ b/app/src/main/java/com/picosoft/xrayproxydroid/monitor/NetworkMonitor.kt
+@@ -1371,7 +1371,9 @@ object NetworkMonitor {
+             // мало при пуле 400+: 10 живых с худшим пингом за его пределами → фон НИКОГДА не набирал цель и КАЖДЫЙ цикл
+             // сканировал зря 60). 180 даёт набрать 10 → пул «здоров» → следующие циклы почти без замеров (стоп при needTop
+             // годных рано). Т.е. 180 ДОЛГОСРОЧНО дешевле: сходится к 10 живых, а не крутит 60 вхолостую. Экономия — 30.
+-            val maxScan = (if (s.trafficSaveMode) 30 else 180).coerceIn(targetTop, needMeasure.size)
++            // Нижняя граница — не больше размера пула: на малом пуле (needMeasure < targetTop) coerceIn(targetTop, size)
++            // бросал «empty range» → фон-рейтинг ничего не мерил (находка порта Windows №3).
++            val maxScan = (if (s.trafficSaveMode) 30 else 180).coerceIn(minOf(targetTop, needMeasure.size), needMeasure.size)
+             // Этап А: МИНИМАЛЬНЫЙ замер (~100 КБ, 1 пробник/3с) от списка 2 к добору; СТОП при наборе needTop годных ИЛИ
+             // maxScan. На tcping-пуле из сотен это ключ к «не 5 ГБ/сут»: мерим горстку, а не всё.
+             val minimalByKey = LinkedHashMap<String, Double>()
+-- 
+2.43.0
+

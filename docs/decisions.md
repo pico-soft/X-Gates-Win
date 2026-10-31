@@ -142,6 +142,8 @@ Android-КК получает хэндофф** (`docs/android-handoff/`) с те
    откладываются. Корпус golden пополнен двумя такими ссылками. Патч Android — `patches/0002`.
 3. `NetworkMonitor.rebuildAndRateTop`: `coerceIn(targetTop, needMeasure.size)` при `needMeasure < 10` — пустой
    диапазон → IllegalArgumentException → «Ошибка фон-рейтинга топа», фон-рейтинг ничего не мерит (малые пулы).
+   **ИСПРАВЛЕНО:** нижняя граница `min(targetTop, size)`. Тест `BackgroundRatingTests` (живой монитор, 3 сервера)
+   до правки падал этой ошибкой, после — топ обновлён, оба кандидата измерены. Патч Android — `patches/0003`.
 4. `ServerSpeedTester.fetchViaTempInstance`: исключение `startLoop` не ловится → обрывает ВЕСЬ каскад загрузки
    подписки, а не только этого кандидата (ступень 6).
 5. `XrayController.start`: проверка `isRunning` и запуск не атомарны с `stop()` в `runCoreStart` — два почти
@@ -236,5 +238,5 @@ Android-КК получает хэндофф** (`docs/android-handoff/`) с те
 - Пропал прямой канал → «Нет интернета», ядро не трогается; вернулся → тот же сервер подтверждён (проверено).
 - Все серверы мертвы → «Рабочих серверов нет» + предложение включить выключенные источники (проверено).
 - Находка №3 (coerceIn при пуле < 10) воспроизводится в живом сценарии: «Ошибка фон-рейтинга топа — Cannot coerce
-  value to an empty range: maximum 0 is less than minimum 10».
+  value to an empty range: maximum 0 is less than minimum 10». (Исправлено позже — см. №3 выше.)
 
