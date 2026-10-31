@@ -385,6 +385,7 @@ public partial class MainWindow : Window
         var w = WinSettingsStore.current();
         SocksPort.Text = w.socksPort.ToString();
         HttpPort.Text = w.httpPort.ToString();
+        TlsFragment.IsChecked = w.tlsFragment;
         HowToText.Text = howTo(w.socksPort, w.httpPort);
         FirefoxStatus.Text = FirefoxSetup.statusText(ctx, w.socksPort);
         FirefoxStatus.Foreground = (Brush)FindResource("Gray");
@@ -678,7 +679,7 @@ public partial class MainWindow : Window
     {
         var err = XrayConfig.portsError(socks, http);
         if (err != null) { PortsStatus.Text = err; PortsStatus.Foreground = Brushes.Firebrick; return; }
-        WinSettingsStore.update(ctx, new WinSettings { socksPort = socks, httpPort = http });
+        WinSettingsStore.update(ctx, WinSettingsStore.current() with { socksPort = socks, httpPort = http });
         PortsStatus.Foreground = Brushes.DarkGreen;
         PortsStatus.Text = $"Сохранено: SOCKS5 127.0.0.1:{socks}, HTTP 127.0.0.1:{http}";
         HowToText.Text = howTo(socks, http);
@@ -687,12 +688,25 @@ public partial class MainWindow : Window
         catch (Exception ex) { PortsStatus.Text += $" · Firefox не обновлён: {ex.Message}"; }
         FirefoxStatus.Text = FirefoxSetup.statusText(ctx, socks);
         // Работающий туннель слушает старые порты → переподнять тот же сервер на новых.
+        if (reconnectCurrent("смена портов")) PortsStatus.Text += " · прокси перезапущен на новых портах";
+    }
+
+    private void OnTlsFragment(object sender, RoutedEventArgs e)
+    {
+        var on = TlsFragment.IsChecked == true;
+        WinSettingsStore.update(ctx, WinSettingsStore.current() with { tlsFragment = on });
+        TlsFragmentStatus.Text = on ? "Включено" : "Выключено";
+        // Работающий туннель собран со старым конфигом.
+        if (reconnectCurrent("смена настройки")) TlsFragmentStatus.Text += " · прокси перезапущен";
+    }
+
+    /// <summary>Переподнять тот же сервер с новым конфигом; false — прокси не запущен.</summary>
+    private bool reconnectCurrent(string reason)
+    {
         var p = ProxyState.state.value;
-        if (p.running && p.serverKey != null && SubscriptionManager.allServers(ctx).FirstOrDefault(x => SubscriptionManager.serverKey(x) == p.serverKey) is { } cur)
-        {
-            main.connectServer(cur, "смена портов");
-            PortsStatus.Text += " · прокси перезапущен на новых портах";
-        }
+        if (!p.running || p.serverKey == null || SubscriptionManager.allServers(ctx).FirstOrDefault(x => SubscriptionManager.serverKey(x) == p.serverKey) is not { } cur) return false;
+        main.connectServer(cur, reason);
+        return true;
     }
 
     private void OnFirefoxSetup(object sender, RoutedEventArgs e) =>

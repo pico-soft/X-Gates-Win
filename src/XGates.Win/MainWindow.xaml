@@ -259,6 +259,12 @@
                     <TextBlock Style="{StaticResource Section}" Text="Запуск" />
                     <CheckBox x:Name="LaunchAtLogin" Content="Запускать при входе в Windows (в трее, с последним сервером)" Click="OnLaunchAtLogin" Margin="0,2" />
 
+                    <TextBlock Style="{StaticResource Section}" Text="Обход блокировок" />
+                    <CheckBox x:Name="TlsFragment" Content="Дробить начало TLS-соединения на части" Click="OnTlsFragment" Margin="0,2" />
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Gray}"
+                               Text="Включайте, если серверы перестали подключаться: помогает, когда блокируют по имени сайта в начале соединения. Подключение и замеры станут чуть медленнее (примерно на 0,15 с)." />
+                    <TextBlock x:Name="TlsFragmentStatus" TextWrapping="Wrap" Margin="0,4,0,0" />
+
                     <TextBlock Style="{StaticResource Section}" Text="Протоколы" />
                     <WrapPanel x:Name="ProtocolsPanel" />
 
