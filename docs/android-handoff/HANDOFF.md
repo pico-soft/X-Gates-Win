@@ -1,4 +1,4 @@
-# Хэндофф X-Gates-Win → X-Gates (Android): 9 исправлений + монитор на зарядке + лицензия MIT
+# Хэндофф X-Gates-Win → X-Gates (Android): 9 исправлений, монитор на зарядке, лицензия MIT, 3 инструкции
 
 **От:** КК проекта X-Gates-Win (`~/projects/X-Gates-Win`, Windows-порт этого приложения).
 **Кому:** КК проекта X-Gates (Android, `~/projects/XrayProxyDroid`).
@@ -6,6 +6,8 @@
 хэндофф: «чтобы при запуске Claude Code в папке Android-версии он прочитал его и внёс исправления».
 **Дополнено 2026-10-31 решениями Elyor:** `0010` — монитор на зарядке, как в Windows-версии (на объяснение
 «делать ли на Android» Elyor ответил «принято»); `0011` — лицензия MIT («MIT на все в pico-soft»).
+**Дополнено 2026-10-31, инструкции 0012–0014:** решение Elyor: «да, делай оба и обнови хэндофф для андроида в случае
+успеха». Windows-версия это уже содержит.
 **Дата:** 2026-10-31. **Основа патчей:** `4b0bebb` (main Android на момент подготовки).
 
 ## Что сделать
@@ -21,6 +23,8 @@ git apply --check handoff-win-fixes/0001-*.patch && git apply handoff-win-fixes/
 
 Используй `git apply`, а не `git am`: `git am` сразу коммитит, а по правилам проекта коммит — после проверки.
 Если HEAD ушёл вперёд и патч не ложится — перенеси правку вручную (смысл в описании ниже и в теле патча).
+
+После патчей выполни инструкции 0012–0014 (раздел ниже): к ним патчей нет.
 
 ## Что уже проверено (на стороне Windows-КК)
 
@@ -52,12 +56,106 @@ git apply --check handoff-win-fixes/0001-*.patch && git apply handoff-win-fixes/
 
 Подробности «почему» — в теле каждого патча и в X-Gates-Win `docs/decisions.md`, раздел «Найдено в Android-коде».
 
+## Инструкции 0012–0014 (патчей нет, правишь сам)
+
+С 2026-10-31 Windows-КК не готовит Kotlin-патчи, Android-тесты и APK (решение Elyor), поэтому здесь только описание:
+что и почему, где в коде, как проверить. Порядок тот же: по одной → сборка → телефон → отдельный коммит.
+
+Образец на C# — `~/projects/X-Gates-Win`, коммиты `3c5d5c3`, `7caba2e`, `9bc34ce`: `src/XGates.Core/Xray/XrayConfigBuilder.cs`,
+`src/XGates.Core/Xray/Link/XhttpExtra.cs`, тесты `tests/XGates.Core.Tests/XhttpExtraTests.cs`, `TlsFragmentConfigTests.cs`.
+Флажок в окне — ветка `wip/windows-shell`, коммит `514b5fc`.
+
+Что проверено на стороне Windows: все 185 тестов на Linux и на настоящей Windows (GitHub Actions, прогон 41211166767), в том
+числе туннели на настоящем xray: TLS, REALITY+TCP, REALITY+XHTTP, с дроблением. Кнопками в окне и в реальной сети не проверено.
+
+Нашлось замером того, что реально принимает и шлёт ядро v26.7.28. По `tools/xray/fetch-xray.sh` версия ядра у Android та
+же, но **на Android и на телефоне ничего из этого не проверялось**. Сначала подтверди 0012 на телефоне.
+
+### 0012. `allowInsecure` не даёт запустить сервер, `pcs` и `vcn` не читаются
+
+**Что ломается.** Ядро убрало `allowInsecure`: конфиг с `"allowInsecure": true` не загружается («The feature
+"allowInsecure" has been removed and migrated to "pinnedPeerCertSha256"(pcs) and "verifyPeerCertByName"(vcn)»), с `false`
+загружается. Сервер из подписки с `allowInsecure=1` или `insecure=1` не запускается и выглядит мёртвым. Замена, `pcs` и
+`vcn`, из ссылок не читается.
+
+**Что сделать.**
+1. `xray/XrayConfigBuilder.kt`, tls-блок (`"allowInsecure": ${p.allowInsecure}`): убрать поле из конфига совсем.
+   Пропустить проверку сертификата теперь нельзя, это решение ядра; самоподписанному серверу нужен `pcs`.
+2. `xray/link/ServerProfile.kt`: добавить `pinnedPeerCertSha256: String? = null`, `verifyPeerCertByName: String? = null`
+   (имена те же, что в Windows-версии). `allowInsecure` оставить: он читается, но в конфиг не идёт. В ключ сервера
+   новые поля не добавлять: иначе сдвинутся стоп-лист и привязка замеров.
+3. `VlessParser.kt`, `TrojanParser.kt`: читать `pcs` и `vcn`, пустое → null. `JsonConfigParser.kt`:
+   `tlsSettings.pinnedPeerCertSha256`, `tlsSettings.verifyPeerCertByName`. vmess-JSON не трогать: таких ключей в нём нет.
+4. tls-блок, после alpn: `"pinnedPeerCertSha256"` и `"verifyPeerCertByName"`, если заданы. Pin чистить при сборке: разбить
+   по запятой, обрезать пробелы, оставить только значения, где без `:` ровно 64 hex-символа; не осталось ни одного — поля
+   нет. Причина: негодное значение ядро отвергает вместе со всем конфигом, а без pin сертификат проверяется как обычно.
+
+**Проверка на телефоне.** Ссылка с `allowInsecure=1` на сервер с настоящим сертификатом подключается, в журнале нет
+«removed and migrated». На самоподписанном без `pcs` сервер мёртвый, но ядро запускается; с верным `pcs` работает, с
+чужим нет. Остальные серверы не затронуты.
+
+### 0013. XHTTP `extra` (XMUX, паддинг, `downloadSettings`) теряется
+
+**Что ломается.** `extra` не читается ни из ссылок, ни из JSON-конфигов. Сервер с нестандартным паддингом отвечает отказом,
+XMUX и `downloadSettings` молча пропадают.
+
+**Что сделать.**
+1. `ServerProfile.kt`: `xhttpExtra: String? = null`.
+2. `VlessParser.kt`, `TrojanParser.kt`: параметр `extra` через фильтр из п. 4. `JsonConfigParser.kt`, ветка xhttp/splithttp:
+   объект `extra`, а если его нет, сам `xhttpSettings`, тоже через фильтр (в ядре при `extra` остальные поля, кроме
+   host/path/mode, не действуют).
+3. `xhttpBlock` билдера: после `mode` добавить `"extra": <JSON>`; фильтр вызвать и здесь, потому что профиль лежит на диске.
+4. **Фильтр обязателен, вставлять `extra` как есть нельзя:** это данные подписки, а в `StreamConfig` ядра есть `masterKeyLog`
+   (запись файла), `certificates` (чтение файлов), `sockopt` (смена маршрута). Перенеси `XhttpExtra.cs` один в один, только
+   разрешённые поля с точным регистром (Go сравнивает имена без учёта регистра), и только пересобранный JSON:
+   - верхний уровень: `headers xPaddingBytes xPaddingObfsMode xPaddingKey xPaddingHeader xPaddingPlacement xPaddingMethod
+     uplinkHTTPMethod sessionIDPlacement sessionIDKey sessionIDTable sessionIDLength seqPlacement seqKey uplinkDataPlacement
+     uplinkDataKey uplinkChunkSize noGRPCHeader noSSEHeader scMaxEachPostBytes scMinPostsIntervalMs scMaxBufferedPosts
+     scStreamUpServerSecs xmux`, плюс `downloadSettings` по списку ниже;
+   - `downloadSettings`: `address port network security`, `tlsSettings`: `serverName alpn fingerprint pinnedPeerCertSha256
+     verifyPeerCertByName`, `realitySettings`: `serverName fingerprint publicKey password shortId spiderX mldsa65Verify`,
+     `xhttpSettings` (или `splithttpSettings`): верхний список плюс `path host mode`, но без вложенных `downloadSettings`
+     и `extra`.
+5. Три случая, без которых ядро не работает:
+   - `downloadSettings` без `address` или `port` выбросить. Конфиг ядро примет, а на первом соединении упадёт: на Linux
+     проверено, `panic: nil pointer dereference`. На Android ядро живёт в процессе приложения, так что, вероятно, упадёт
+     приложение (не проверено);
+   - при `mode=stream-one` убрать `downloadSettings`: иначе конфиг не загрузится;
+   - из `headers` убрать `Host` без учёта регистра: иначе конфиг не загрузится.
+
+**Проверка на телефоне.** Сервер XHTTP с `extra` в ссылке подключается и носит трафик; ссылка с `downloadSettings` без
+адреса не роняет приложение. Обычные XHTTP-серверы работают как раньше.
+
+### 0014. Опция фрагментации ClientHello (новая, выключена по умолчанию)
+
+**Зачем.** Имя сайта идёт в ClientHello открытым текстом, по нему блокировка и срабатывает. Опция дробит это сообщение.
+Поможет только при блокировке по имени сайта; проверить это можно лишь в реальной сети, и такой проверки ещё не было.
+ClientHello как у Chrome у ядра уже есть, отпечаток HTTP/2 трогать не нужно: кадры идут внутри TLS, ТСПУ их не видит.
+
+**Что сделать.**
+1. Настройка `tlsFragment: Boolean = false`. Хранение выбери по своим правилам `SettingsStore`. В Windows-версии она лежит
+   отдельно, в `win_settings.json`, чтобы `settings.json` оставался как у Android; если добавишь поле туда, напиши в докладе.
+2. В `build` и `buildForSpeedTest`, третьим outbound: `{ "tag": "fragment", "protocol": "freedom", "settings": { "fragment":
+   { "packets": "tlshello", "length": "100-200", "interval": "10-20" } } }`. В `streamSettings`: `"sockopt": { "dialerProxy":
+   "fragment" }`. Замеры без этого показывали бы сервер мёртвым при живом туннеле.
+3. Применять, только если security после нормализации `tls` или `reality`, а транспорт не `kcp`/`mkcp`.
+4. Канал загрузки `sockopt` основного соединения не наследует: при включённой опции, если в `extra` есть `downloadSettings`,
+   поставь ему тот же `sockopt` (в Windows-версии без этого канал идёт недроблёным, тест это ловит). При `stream-one` блока нет.
+5. Экран настроек: флажок, текст как в Windows-версии («Дробить начало TLS-соединения на части»; включать, если серверы
+   перестали подключаться; подключение и замеры чуть медленнее, примерно на 0,15 с). При смене переподнять работающий сервер.
+
+**Проверка на телефоне.** С выключенной опцией конфиг байт в байт прежний. С включённой туннель работает на TLS и на REALITY
+(TCP и XHTTP), счётчик трафика растёт, пинг выше примерно на 0,15 с. Если есть сервер, недоступный из-за блокировки по имени,
+посмотри, помогает ли опция, и напиши результат: это первая проверка в реальной сети.
+
 ## Важно для паритета
 
 - Windows-версия уже содержит **ровно эти** правки. Если при переносе меняешь решение (другой текст, другая
   логика) — скажи Elyor: Windows-КК выровняет у себя, иначе версии разойдутся.
 - После твоих коммитов Windows-КК синхронизируется по `UPSTREAM-SYNC.md` своего репозитория. Golden-эталон там
   сейчас снят с «4b0bebb + патчи 0001–0002»; после твоего коммита он должен совпасть с эталоном от твоего HEAD.
+- Пока 0012 не внесён, Windows ждёт расхождение по `allowInsecure` и снимает его в тесте. После 0012–0013 эталон
+  переснимается, поэтому новые поля профиля называй точно как здесь: `pinnedPeerCertSha256`, `verifyPeerCertByName`, `xhttpExtra`.
 
 ## Не входит в эту задачу (для сведения)
 
@@ -68,4 +166,4 @@ git apply --check handoff-win-fixes/0001-*.patch && git apply handoff-win-fixes/
 1. Удали `CLAUDE.md` (создан только ради этого хэндоффа), `HANDOFF-WIN-FIXES.md` и папку `handoff-win-fixes/` —
    копия хранится в X-Gates-Win `docs/android-handoff/`.
 2. Запиши в свою память, что сделано и что проверено на телефоне.
-3. Доложи Elyor: какие патчи приняты, что проверено на каком телефоне, что не удалось проверить.
+3. Доложи Elyor: какие патчи и инструкции приняты, что проверено на каком телефоне, что не удалось проверить.
