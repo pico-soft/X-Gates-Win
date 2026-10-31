@@ -72,6 +72,7 @@ public sealed class BackgroundRatingTests : IDisposable
         var srvA = SubscriptionManager.allServers(ctx).Single(p => p.remarks == "S0");
         var keyA = SubscriptionManager.serverKey(srvA);
 
+        MonitorLog.clear(ctx);   // журнал общий на процесс — смотрим только события этого теста
         XrayProxyService.start(ctx, XrayConfigBuilder.build(srvA), "S0", keyA);
         bool Rated() => MonitorLog.state.value.Any(e => e.text.StartsWith("Фон: топ обновлён"));
         bool Failed() => MonitorLog.state.value.Any(e => e.text == "Ошибка фон-рейтинга топа");
