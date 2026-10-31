@@ -49,7 +49,7 @@ public static class UpdateInstaller
 
         // Промпт 121.B: адреса по порядку (текущий → запасные), каждый через полный каскад. Провал скачивания или
         // несовпадение суммы — пробуем следующий адрес; успех с верной суммой — выходим.
-        DownloadOutcome.Fail? lastFail = null;
+        DownloadOutcome.Fail? lastFail = null, checksumFail = null;
         foreach (var url in available.downloadUrls)
         {
             if (isCancelled()) { tryDelete(dest); return new DownloadOutcome.Fail(UpdateErrorKind.CANCELLED); }
@@ -71,7 +71,7 @@ public static class UpdateInstaller
             if (!actual.Equals(available.artifact.sha256, StringComparison.OrdinalIgnoreCase))
             {
                 tryDelete(dest);
-                lastFail = new DownloadOutcome.Fail(UpdateErrorKind.CHECKSUM_MISMATCH,
+                lastFail = checksumFail = new DownloadOutcome.Fail(UpdateErrorKind.CHECKSUM_MISMATCH,
                     $"{hostOf(url)}: ожидали {available.artifact.sha256[..Math.Min(16, available.artifact.sha256.Length)]}…, получили {actual[..16]}…");
                 continue;
             }
@@ -79,8 +79,8 @@ public static class UpdateInstaller
         }
         // Пр.135: сам установщик через одноразовый temp-инстанс НЕ тянем (дорого). Прямой путь заблокирован, а туннеля
         // нет — честно направляем поднять прокси (сведения об обновлении могли прийти через temp-инстанс).
-        // ПАРИТЕТ: при несовпадении суммы на всех адресах без туннеля подсказка про прокси ложна — так и на Android
-        // (docs/decisions.md, «Найдено в Android-коде» №7; чинить в обеих версиях сразу).
+        // Находка порта №7: файл ДОШЁЛ, но сумма не совпала → путь не заблокирован, подсказка про прокси была бы ложной.
+        if (checksumFail != null) return checksumFail;
         if (!CascadeFetch.isOwnProxyUp())
             return new DownloadOutcome.Fail(UpdateErrorKind.DOWNLOAD_FAILED,
                 "Прямой доступ к GitHub заблокирован, а прокси не запущен. Запустите прокси на вкладке «Главная» и повторите — файл скачается через туннель.");
