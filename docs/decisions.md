@@ -128,11 +128,15 @@
   прокси), но **отчёт о сбое пишем** (`KThread.onUncaught` → `CrashReporter.report`), иначе ошибка в поле невидима.
   Отвергнуто: ронять процесс «как на Android» — без перезапуска это хуже для пользователя.
 
-## Найдено в Android-коде при порте (НЕ чинили в одностороннем порядке — решать вместе, UPSTREAM-SYNC)
+## Найдено в Android-коде при порте (решение Elyor 2026-10-30: чинить в ОБЕИХ версиях)
 
-Порт держит паритет, поэтому Windows-версия повторяет эти места; исправлять — в ОБЕИХ версиях сразу.
+Порт держал паритет, поэтому Windows-версия повторяла эти места. **Решение Elyor (2026-10-30): исправить здесь, а
+Android-КК получает хэндофф** (`docs/android-handoff/`) с теми же исправлениями в виде Kotlin-патчей. Патчи
+проверены здесь же на временной копии Android-кода: golden-эталон (`tools/golden`, `GOLDEN_SRC=<копия с патчами>`)
+снят с ПАТЧЕННОГО Kotlin, и C# с ним совпадает — паритет сохраняется, пока Android не примет патчи.
 1. `JsonConfigParser` отдаёт `network="splithttp"`, а `XrayConfigBuilder` его не принимает («unsupported transport»)
-   → JSON-серверы со splithttp не собираются.
+   → JSON-серверы со splithttp не собираются. **ИСПРАВЛЕНО:** splithttp — синоним xhttp в `XrayConfigBuilder`
+   (как raw→tcp, kcp→mkcp); профиль не меняется (serverKey стабилен). Патч Android — `patches/0001`.
 2. ~1.5% реальных vmess-ссылок вида `vmess://<base64>=?…` отбрасываются (хвост после паддинга ломает Base64).
 3. `NetworkMonitor.rebuildAndRateTop`: `coerceIn(targetTop, needMeasure.size)` при `needMeasure < 10` — пустой
    диапазон → IllegalArgumentException → «Ошибка фон-рейтинга топа», фон-рейтинг ничего не мерит (малые пулы).

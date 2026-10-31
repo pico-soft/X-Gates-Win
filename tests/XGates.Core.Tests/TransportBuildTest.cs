@@ -118,6 +118,27 @@ public class TransportBuildTest
     }
 
     [Fact]
+    public void splithttp_normalizes_to_xhttp()
+    {
+        // Находка порта №1: splithttp (старое имя xhttp) раньше падал «unsupported transport» — и из ссылки, и из JSON.
+        var link = vless("vless://11111111-1111-1111-1111-111111111111@h.example.com:443?type=splithttp&path=%2Fsp&host=cdn.example.com&security=tls&sni=cdn.example.com#n");
+        var json = JsonConfigParser.parse("""
+            [{"remarks":"j","outbounds":[{"protocol":"vless","settings":{"vnext":[{"address":"h.example.com","port":443,
+              "users":[{"id":"11111111-1111-1111-1111-111111111111"}]}]},
+              "streamSettings":{"network":"splithttp","security":"none","splithttpSettings":{"path":"/sp","host":"cdn.example.com"}}}]}]
+            """).Single();
+        foreach (var p in new[] { link, json })
+        {
+            Assert.Equal("splithttp", p.network);                 // сырьё в профиле НЕ трогаем (serverKey стабилен)
+            var cfg = XrayConfigBuilder.build(p);
+            Assert.Contains("\"network\": \"xhttp\"", cfg);
+            Assert.Contains("\"xhttpSettings\"", cfg);
+            Assert.Contains("\"path\": \"/sp\"", cfg);
+            Assert.True(balanced(cfg), "json balanced");
+        }
+    }
+
+    [Fact]
     public void still_supports_ws_grpc()
     {
         var ws = XrayConfigBuilder.build(vless("vless://11111111-1111-1111-1111-111111111111@h:443?type=ws&path=%2Fw&host=x.com&security=tls&sni=x.com#n"));
