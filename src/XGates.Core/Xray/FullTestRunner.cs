@@ -199,7 +199,14 @@ public static class FullTestRunner
                             ? ServerSpeedTester.measureSpeed(appCtx, activeProfile) : -1.0;
                         if (activeProfile != null && activeMbps > 0.0) onSpeedResult(activeProfile, activeMbps, true);   // measureSpeed — полный; в «Живые»
                         beat();
-                        if (activeProfile != null && activeMbps >= s.monitorTunnelThreshold)
+                        // Находка порта №8: активный, поставленный на паузу («Не использовать»), НЕ инкумбент — иначе
+                        // кнопка ничего не переключала (замена должна была быть в keepBestMultiplier раз быстрее).
+                        var activePaused = activeProfile != null && ServerFilter.isPaused(activeProfile, blocklist);
+                        if (activePaused)
+                        {
+                            onPhase($"Активный {label(activeProfile!)} отложен («Не использовать») — ищу замену");
+                        }
+                        else if (activeProfile != null && activeMbps >= s.monitorTunnelThreshold)
                         {
                             connected = activeProfile; connectedSpeed = activeMbps; Volatile.Write(ref hbConnected, activeProfile); keepActive = true;
                             onPhase($"Активный {label(activeProfile)}: ↓{fmt(activeMbps)} Мбит/с (в норме) — переключусь только если кандидат ×{fmt(s.keepBestMultiplier)} быстрее");

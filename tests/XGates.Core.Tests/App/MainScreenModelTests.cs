@@ -154,14 +154,15 @@ public sealed class MainScreenModelTests : IDisposable
         model.onRemoveCurrent();   // «Не использовать»: на паузу + полный тест
         Assert.True(WaitUntil(() => BlocklistStore.current().isPaused(SubscriptionManager.serverKey(servers[0])), 5_000));
         Assert.True(WaitTestDone(), TestProgress.state.value.phase);
-        // ПАРИТЕТ с Android: полный тест берёт активный «в норме» инкумбентом, НЕ глядя на паузу → при равной скорости
-        // второго сервера (петля) переключения нет (docs/decisions.md, «Найдено в Android-коде» №8).
-        Assert.True(ProxyState.state.value.running);
+        // Находка порта №8 (исправлено): отложенный активный НЕ инкумбент → тест переключает на второй сервер даже при
+        // равной скорости (раньше туннель оставался на отложенном).
+        Assert.True(WaitUntil(() => ProxyState.state.value is { running: true } st && st.serverKey == SubscriptionManager.serverKey(servers[1]), 10_000),
+            $"не переключился с отложенного: {ProxyState.state.value.label} · {TestProgress.state.value.phase}");
         var s = Snap();
         Assert.Equal(1, s.hiddenCount);                              // отложенный — в счётчике «скрыто»
         Assert.True(Assert.Single(s.all, r => r.name == "srv0").paused);
-        // Он же остаётся в «Живых» — как ПОДТВЕРЖДЁННЫЙ активный (правило Kotlin: isProvenActive) — с пометкой паузы.
-        Assert.All(s.alive.Where(r => r.name == "srv0"), r => Assert.True(r.isActive && r.paused));
+        Assert.False(Assert.Single(s.all, r => r.name == "srv0").isActive);
+        Assert.True(Assert.Single(s.all, r => r.name == "srv1").isActive);
 
         model.toggleUse(servers[0]);                                  // глаз: снова «использовать»
         Assert.True(WaitUntil(() => !BlocklistStore.current().isPaused(SubscriptionManager.serverKey(servers[0])), 5_000));
