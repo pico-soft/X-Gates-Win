@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using XGates.Core.Monitor;
 using XGates.Core.Platform;
 using XGates.Core.Service;
+using XGates.Core.Settings;
 using XGates.Core.Subscription;
 using XGates.Core.Tests.Libv2ray;
 using XGates.Core.Xray;
@@ -116,6 +117,63 @@ public sealed class ServiceAndFullTestIntegrationTests : IDisposable
         h.cancel();
         fin.Wait(30_000);
         XrayProxyService.stop(ctx);
+        Assert.True(WaitUntil(() => !PortOpen(10815), 10_000));
+    }
+
+    [Fact]
+    public void Stuck_speed_probe_is_cut_off_and_plate_stops_saying_measuring()
+    {
+        var p = ImportServers(net.StartVlessServer())[0];
+        var key = SubscriptionManager.serverKey(p);
+        using var mute = new TcpListener(IPAddress.Loopback, 0);   // принимает соединение и молчит: замер висит
+        mute.Start();
+        var url = $"http://127.0.0.1:{((IPEndPoint)mute.LocalEndpoint).Port}/x";
+        ServerSpeedTester.probesOverrideForTest = [url];
+        SettingsStore.update(ctx, SettingsStore.current() with { directProbeUrl = url, liveSpeedEnabled = false });
+        NetworkMonitor.ACTIVE_PROBE_CAP_MS = 1_500;
+        try
+        {
+            XrayProxyService.start(ctx, XrayConfigBuilder.build(p), ServerLabels.full(p), key);
+            Assert.True(WaitUntil(() => ProxyState.state.value.running, 10_000), ProxyState.state.value.message);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            NetworkMonitor.probeActiveCapped(ctx);
+            Assert.True(sw.ElapsedMilliseconds < 15_000, $"потолок не сработал: {sw.ElapsedMilliseconds} мс");
+            Assert.False(TunnelSpeed.measuring.value);
+            var ts = TunnelSpeed.snapshot();
+            Assert.True(ts.serverKey == key && ts.measuredAtMs > 0 && ts.tunnelDownMbps == null, ts.ToString());
+        }
+        finally
+        {
+            NetworkMonitor.ACTIVE_PROBE_CAP_MS = 45_000L;
+            SettingsStore.update(ctx, SettingsStore.current() with { directProbeUrl = SettingsStore.DEFAULTS.directProbeUrl, liveSpeedEnabled = true });
+            XrayProxyService.stop(ctx);
+        }
+        Assert.True(WaitUntil(() => !PortOpen(10815), 10_000));
+    }
+
+    [Fact]
+    public void New_server_gets_speed_measured_at_once_not_after_probe_interval()
+    {
+        var servers = ImportServers(net.StartVlessServer(), net.StartVlessServer());
+        var localUrl = $"http://127.0.0.1:{net.HttpPort}/bytes?n=30000000&slow=1";
+        var savedUpload = ServerSpeedTester.uploadFallbacks;
+        ServerSpeedTester.uploadFallbacks = [];
+        SettingsStore.update(ctx, SettingsStore.current() with { directProbeUrl = localUrl, uploadProbeUrl = $"http://127.0.0.1:{net.HttpPort}/up?slow=1" });
+        string a = SubscriptionManager.serverKey(servers[0]), b = SubscriptionManager.serverKey(servers[1]);
+        bool measured(string k) { TunnelHealth.setPhase(TunnelHealth.Phase.VERIFYING, JavaSystem.currentTimeMillis(), "тест"); MonitorCoordinator.wake(); return TunnelSpeed.snapshot() is var s && s.serverKey == k && s.measuredAtMs > 0; }
+        try
+        {
+            XrayProxyService.start(ctx, XrayConfigBuilder.build(servers[0]), ServerLabels.full(servers[0]), a);
+            Assert.True(WaitUntil(() => measured(a), 40_000), $"первый сервер не измерен: {TunnelSpeed.snapshot()}");
+            XrayProxyService.start(ctx, XrayConfigBuilder.build(servers[1]), ServerLabels.full(servers[1]), b);
+            Assert.True(WaitUntil(() => measured(b), 40_000), $"новый сервер не измерен: {TunnelSpeed.snapshot()}");
+        }
+        finally
+        {
+            ServerSpeedTester.uploadFallbacks = savedUpload;
+            SettingsStore.update(ctx, SettingsStore.current() with { directProbeUrl = SettingsStore.DEFAULTS.directProbeUrl, uploadProbeUrl = SettingsStore.DEFAULTS.uploadProbeUrl });
+            XrayProxyService.stop(ctx);
+        }
         Assert.True(WaitUntil(() => !PortOpen(10815), 10_000));
     }
 

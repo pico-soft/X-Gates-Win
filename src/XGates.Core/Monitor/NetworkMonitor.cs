@@ -83,6 +83,9 @@ public static class NetworkMonitor
     // окно пассивного замера — 6с (счётчик трафика тикает раз в POLL_MS=2.5с → окно должно перекрыть ≥2 тика,
     // иначе дельта случайно 0 при живом трафике); порог «трафик идёт» — 32 КБ за окно (keepalive < этого).
     private const long SPEED_SAMPLE_MIN_GAP_MS = 50_000L;
+    // Потолок активной пробы: она идёт внутри цикла монитора, и на провалах отдачи цикл минутами не проверял связь.
+    // Не const: тест зависшего замера укорачивает его.
+    internal static long ACTIVE_PROBE_CAP_MS = 45_000L;
     private const long SPEED_PASSIVE_WINDOW_MS = 6_000L;
     private const long SPEED_PASSIVE_MIN_BYTES = 32L * 1024L;
 
@@ -1567,8 +1570,21 @@ public static class NetworkMonitor
         if (now() - lastActiveProbeMs < cur.liveSpeedActiveProbeSec * 1000L) return lastActiveProbeMs;
         if (!screenInteractive(app)) return lastActiveProbeMs;
         if (MonitorCoordinator.fullTestRunning || ProxyState.state.value.serverKey != curKey) return lastActiveProbeMs;
-        probeActiveSpeedNow(app);
+        probeActiveCapped(app);
         return now();
+    }
+
+    /// <summary>Активная проба с потолком: зависший замер прерываем и честно записываем, что числа нет.</summary>
+    internal static void probeActiveCapped(Context app)
+    {
+        var key = ProxyState.state.value.serverKey;
+        var probe = KThread.start(() => { try { probeActiveSpeedNow(app); } catch (Exception e) { Log.w(TAG, "активная проба", e); } }, "monitor-active-probe");
+        if (probe.Join(TimeSpan.FromMilliseconds(ACTIVE_PROBE_CAP_MS))) return;
+        ServerSpeedTester.abortCurrentMeasure();
+        probe.Join(TimeSpan.FromMilliseconds(10_000));   // дождаться РЕАЛЬНОГО завершения после прерывания
+        ServerSpeedTester.resetMeasureAbort();           // снять флаг — иначе следующие замеры «немы»
+        if (key != null && ProxyState.state.value.serverKey == key) TunnelSpeed.setProbe(null, null, null, now(), key);
+        MonitorLog.@event(app, "error", "Замер скорости прерван", $"не уложился в {ACTIVE_PROBE_CAP_MS / 1000} с");
     }
 
     /**
@@ -1642,6 +1658,13 @@ public static class NetworkMonitor
     {
         var curKey = ProxyState.state.value.serverKey;
         if (curKey == null) return -1.0;
+        TunnelSpeed.setMeasuring(true);
+        try { return probeActive(app, curKey, includeUpload); }
+        finally { TunnelSpeed.setMeasuring(false); }
+    }
+
+    private static double probeActive(Context app, string curKey, bool includeUpload)
+    {
         var directM = ServerSpeedTester.measureDirectDownloadMbps(app);
         double? direct = directM >= 0.0 ? directM : null;                                   // НАПРЯМУЮ ↓ (без туннеля)
         var down = ServerSpeedTester.measureActiveDownloadMbps(app);                       // В ТУННЕЛЕ ↓

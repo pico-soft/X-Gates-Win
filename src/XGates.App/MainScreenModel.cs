@@ -44,6 +44,7 @@ public sealed record StatusInfo(
     double? tunnelDownMbps,
     double? tunnelUpMbps,
     long liveMeasuredAtMs,
+    bool speedMeasuring,     // проба идёт сейчас; иначе «замеряю» на плашке было бы неправдой
     bool tunnelOk,
     bool hidden,
     bool blocked,
@@ -163,6 +164,7 @@ public sealed class MainScreenModel : IDisposable
         BlocklistStore.stopWordsSuspended.changed += onAnyChanged;
         TunnelHealth.state.changed += onHealthChanged;
         TunnelSpeed.state.changed += onAnyChanged;
+        TunnelSpeed.measuring.changed += onAnyChanged;
         UpdateStore.record.changed += onAnyChanged;
         MonitorPrompt.state.changed += onAnyChanged;
 
@@ -184,6 +186,7 @@ public sealed class MainScreenModel : IDisposable
         BlocklistStore.stopWordsSuspended.changed -= onAnyChanged;
         TunnelHealth.state.changed -= onHealthChanged;
         TunnelSpeed.state.changed -= onAnyChanged;
+        TunnelSpeed.measuring.changed -= onAnyChanged;
         UpdateStore.record.changed -= onAnyChanged;
         MonitorPrompt.state.changed -= onAnyChanged;
         reloadTimer.Dispose(); ipTimer.Dispose();
@@ -850,7 +853,7 @@ public sealed class MainScreenModel : IDisposable
             pingAge: tunnelSpeed.serverKey == proxy.serverKey && tunnelSpeed.pingAtMs > 0L ? speedAgeTextMs(tunnelSpeed.pingAtMs) : "",
             uploadMbps: activeUploadMbps,
             directDownMbps: ts.directDownMbps, tunnelDownMbps: ts.tunnelDownMbps, tunnelUpMbps: ts.tunnelUpMbps,
-            liveMeasuredAtMs: ts.measuredAtMs, tunnelOk: connConfirmed, hidden: activeHidden, blocked: activeBlocked,
+            liveMeasuredAtMs: ts.measuredAtMs, speedMeasuring: TunnelSpeed.measuring.value, tunnelOk: connConfirmed, hidden: activeHidden, blocked: activeBlocked,
             problem: proxy.running && health.phase is TunnelHealth.Phase.NO_INTERNET or TunnelHealth.Phase.RECOVERING or TunnelHealth.Phase.NO_SERVERS,
             message: proxy.message, paused: proxy.paused);
 

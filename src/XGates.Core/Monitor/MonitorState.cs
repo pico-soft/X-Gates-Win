@@ -142,6 +142,11 @@ public static class TunnelSpeed
     private static readonly MutableStateFlow<Speed> _state = new(new Speed());
     public static StateFlow<Speed> state => _state.asStateFlow();
 
+    private static readonly MutableStateFlow<bool> _measuring = new(false);
+    /// <summary>Активная проба идёт прямо сейчас: только тогда плашка вправе писать «замеряю».</summary>
+    public static StateFlow<bool> measuring => _measuring.asStateFlow();
+    public static void setMeasuring(bool on) => _measuring.value = on;
+
     /// <summary>Активная проба: свежие прямой канал + туннель ↓/↑ для сервера [serverKey]. Живой пинг сохраняем (если тот же сервер).</summary>
     public static void setProbe(double? directDownMbps, double? tunnelDownMbps, double? tunnelUpMbps, long nowMs, string serverKey) =>
         _state.update(s =>

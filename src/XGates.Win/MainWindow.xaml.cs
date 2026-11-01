@@ -163,7 +163,7 @@ public partial class MainWindow : Window
         if (tunnelOk)
         {
             StatusDirect.Text = $"Напрямую: ↓{(st.directDownMbps is >= 0 ? r1(st.directDownMbps.Value) : "—")} Мбит/с";
-            if (st.liveMeasuredAtMs <= 0L) StatusTunnel.Text = "замеряю скорость…";
+            if (st.liveMeasuredAtMs <= 0L) StatusTunnel.Text = st.speedMeasuring ? "замеряю скорость…" : "скорость ещё не измерена";
             else
             {
                 var ageMin = (int)((JavaSystem.currentTimeMillis() - st.liveMeasuredAtMs) / 60_000L);
