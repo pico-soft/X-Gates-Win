@@ -78,7 +78,7 @@ public sealed class CascadeFetchIntegrationTests : IDisposable
             int calls = 0;
             var r = CascadeFetch.fetch(ctx, U("/sub"), "ua", 3000, 5000, 20_000,
                 acceptBody: it => it.ok && ++calls > 1, allowTempInstance: false);
-            Assert.True(r.ok);
+            Assert.True(r.ok, string.Join(" | ", r.attempts));   // одно падение на Windows без подробностей не разобрать
             Assert.Equal(FetchStage.OWN_PROXY, r.stage);
             Assert.False(r.attempts[0].accepted);
         }
