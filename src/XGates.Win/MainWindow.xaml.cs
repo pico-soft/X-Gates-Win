@@ -387,7 +387,8 @@ public partial class MainWindow : Window
         HttpPort.Text = w.httpPort.ToString();
         TlsFragment.IsChecked = w.tlsFragment;
         HowToText.Text = howTo(w.socksPort, w.httpPort);
-        FirefoxStatus.Text = FirefoxSetup.statusText(ctx, w.socksPort);
+        TelegramPort.Text = w.socksPort.ToString();
+        FirefoxStatus.Text = FirefoxSetup.statusText(ctx, w.socksPort, w.httpPort);
         FirefoxStatus.Foreground = (Brush)FindResource("Gray");
         var s = SettingsStore.current();
         try { LaunchAtLogin.IsChecked = Autostart.isEnabled(); } catch (Exception) { LaunchAtLogin.IsChecked = false; }
@@ -578,18 +579,14 @@ public partial class MainWindow : Window
     /// <summary>Инструкции (текст можно выделить и скопировать). Порты — текущие.</summary>
     private static string howTo(int socks, int http) =>
         $"""
-        Firefox: проще всего — кнопка «Настроить Firefox» выше, затем закройте Firefox и откройте заново («Вернуть как было» — чтобы снять).
-          Вручную: Настройки → Основные → Параметры сети → «Настроить…» → «Ручная настройка прокси»:
-          узел SOCKS 127.0.0.1, порт {socks}, SOCKS 5, ☑ «Отправлять DNS-запросы через прокси при использовании SOCKS 5».
-          Остальные поля пустые. Проверка: откройте 2ip.ru — адрес и страна должны быть зарубежными.
+        Firefox вручную: Настройки → Основные → Параметры сети → «Настроить…» → «Ручная настройка прокси».
+          HTTP-прокси: адрес 127.0.0.1, порт {http}. Для HTTPS — те же адрес и порт.
+          Проверка: откройте 2ip.ru — адрес и страна должны быть зарубежными.
 
         Chrome / Edge: сами берут только СИСТЕМНЫЙ прокси, а приложение его не меняет. Варианты:
           • расширение-переключатель прокси (SOCKS5 127.0.0.1:{socks});
           • отдельный ярлык браузера с параметром  --proxy-server="socks5://127.0.0.1:{socks}"
             (все окна браузера нужно закрыть перед запуском такого ярлыка).
-
-        Telegram Desktop: Настройки → Продвинутые настройки → Тип соединения → «Использовать собственный прокси» →
-          SOCKS5, сервер 127.0.0.1, порт {socks}, логин и пароль пустые.
 
         Программы с HTTP-прокси: 127.0.0.1:{http}.
         """;
@@ -684,9 +681,10 @@ public partial class MainWindow : Window
         PortsStatus.Text = $"Сохранено: SOCKS5 127.0.0.1:{socks}, HTTP 127.0.0.1:{http}";
         HowToText.Text = howTo(socks, http);
         // Firefox настроен нами — его блок прокси тоже на новый порт (вступит после перезапуска Firefox).
-        try { if (FirefoxSetup.refreshPort(ctx, socks) is { ok: true }) PortsStatus.Text += " · Firefox: перезапустите его, чтобы взять новый порт"; }
+        TelegramPort.Text = socks.ToString();
+        try { if (FirefoxSetup.refreshPort(ctx, socks, http) is { ok: true }) PortsStatus.Text += " · Firefox: перезапустите его, чтобы взять новый порт"; }
         catch (Exception ex) { PortsStatus.Text += $" · Firefox не обновлён: {ex.Message}"; }
-        FirefoxStatus.Text = FirefoxSetup.statusText(ctx, socks);
+        FirefoxStatus.Text = FirefoxSetup.statusText(ctx, socks, http);
         // Работающий туннель слушает старые порты → переподнять тот же сервер на новых.
         if (reconnectCurrent("смена портов")) PortsStatus.Text += " · прокси перезапущен на новых портах";
     }
@@ -710,7 +708,7 @@ public partial class MainWindow : Window
     }
 
     private void OnFirefoxSetup(object sender, RoutedEventArgs e) =>
-        showFirefox(() => FirefoxSetup.configure(ctx, WinSettingsStore.current().socksPort));
+        showFirefox(() => FirefoxSetup.configure(ctx, WinSettingsStore.current().socksPort, WinSettingsStore.current().httpPort));
 
     private void OnFirefoxRestore(object sender, RoutedEventArgs e) => showFirefox(() => FirefoxSetup.restore(ctx));
 
@@ -725,8 +723,22 @@ public partial class MainWindow : Window
             MessageBox.Show(this, FirefoxSetup.RESTART_TEXT, "Перезапустите Firefox", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    private void OnCopySocks(object sender, RoutedEventArgs e) => copy($"127.0.0.1:{WinSettingsStore.current().socksPort}");
-    private void OnCopyHttp(object sender, RoutedEventArgs e) => copy($"127.0.0.1:{WinSettingsStore.current().httpPort}");
+    // Адрес и порт — отдельно: в поле порта у Firefox и Telegram годится только число.
+    private void OnCopyAddress(object sender, RoutedEventArgs e) => copyAndConfirm(sender, "127.0.0.1");
+    private void OnCopySocks(object sender, RoutedEventArgs e) => copyAndConfirm(sender, WinSettingsStore.current().socksPort.ToString());
+    private void OnCopyHttp(object sender, RoutedEventArgs e) => copyAndConfirm(sender, WinSettingsStore.current().httpPort.ToString());
+
+    /// <summary>Скопировать и на пару секунд подтвердить на самой кнопке (тост Android).</summary>
+    private void copyAndConfirm(object sender, string text)
+    {
+        copy(text);
+        if (sender is not Button b) return;
+        var label = b.Content;
+        b.Content = "Скопировано";
+        var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+        t.Tick += (_, _) => { t.Stop(); b.Content = label; };
+        t.Start();
+    }
 
     private void OnLaunchAtLogin(object sender, RoutedEventArgs e)
     {

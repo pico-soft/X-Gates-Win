@@ -10,7 +10,7 @@ namespace XGates.Core.Tests.App;
 
 /// <summary>
 /// «Настроить Firefox» / «Вернуть как было» на НАСТОЯЩЕМ Firefox раннера Windows: его профиль, его разбор user.js, его
-/// сетевой код. Приёмник SOCKS5 записывает, куда Firefox просится; настоящий туннель для этого не нужен.
+/// сетевой код. Приёмники HTTP и SOCKS5 записывают, куда Firefox просится; настоящий туннель для этого не нужен.
 /// Запускается только с XGATES_FIREFOX_E2E=1 (шаг в windows.yml): тест правит обычный профиль Firefox и убивает все его
 /// процессы, на машине разработчика такому делать нечего. Подробности (profiles.ini, user.js, настройки прокси) —
 /// в файле XGATES_FIREFOX_OUT/firefox.log.
@@ -78,6 +78,43 @@ public sealed class FirefoxRealBrowserTests
         public void Dispose() => lsn.Stop();
     }
 
+    /// <summary>Приёмник HTTP-прокси: запись цели из первой строки запроса, отказ. Сам запрос никуда не идёт.</summary>
+    private sealed class HttpRecorder : IDisposable
+    {
+        private readonly TcpListener lsn = new(IPAddress.Loopback, 0);
+        public readonly ConcurrentQueue<string> targets = new();
+        public int port => ((IPEndPoint)lsn.LocalEndpoint).Port;
+
+        public HttpRecorder()
+        {
+            lsn.Start();
+            _ = Task.Run(acceptLoop);
+        }
+
+        private async Task acceptLoop()
+        {
+            try { while (true) { var c = await lsn.AcceptTcpClientAsync(); _ = Task.Run(() => serve(c)); } }
+            catch (Exception) { }
+        }
+
+        private async Task serve(TcpClient c)
+        {
+            using (c)
+                try
+                {
+                    var s = c.GetStream();
+                    var line = await new StreamReader(s, Encoding.ASCII, leaveOpen: true).ReadLineAsync();
+                    var parts = line?.Split(' ') ?? [];
+                    if (parts.Length < 2) return;
+                    targets.Enqueue(parts[0] == "CONNECT" ? parts[1].Split(':')[0] : new Uri(parts[1]).Host);
+                    await s.WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"));
+                }
+                catch (Exception) { }
+        }
+
+        public void Dispose() => lsn.Stop();
+    }
+
     private static string firefoxExe() =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Mozilla Firefox", "firefox.exe");
 
@@ -104,9 +141,10 @@ public sealed class FirefoxRealBrowserTests
         return done();
     }
 
-    private static void dump(string title, SocksRecorder socks)
+    private static void dump(string title, HttpRecorder http, SocksRecorder socks)
     {
         log($"=== {title}");
+        log("цели HTTP: " + string.Join(", ", http.targets.Distinct()));
         log("цели SOCKS: " + string.Join(", ", socks.targets.Distinct()));
         foreach (var p in FirefoxSetup.findProfiles())
         {
@@ -129,7 +167,9 @@ public sealed class FirefoxRealBrowserTests
 
         var ctx = new Context(Path.Combine(Path.GetTempPath(), "xgates-ff-real-" + Guid.NewGuid().ToString("N")));
         using var socks = new SocksRecorder();
-        bool reached() => socks.targets.Contains(PROBE);
+        using var http = new HttpRecorder();
+        bool reached() => http.targets.Contains(PROBE);
+        void forget() { while (http.targets.TryDequeue(out _)) { } while (socks.targets.TryDequeue(out _)) { } }
         try
         {
             // Первый запуск создаёт профиль, как у человека, который открыл браузер после установки.
@@ -142,38 +182,39 @@ public sealed class FirefoxRealBrowserTests
                     log($"--- {root}\\profiles.ini{Environment.NewLine}{File.ReadAllText(Path.Combine(root, "profiles.ini"))}");
 
             // Firefox закрыт: нажали кнопку, открыли браузер (пункт 18а).
-            var closed = FirefoxSetup.configure(ctx, socks.port);
+            var closed = FirefoxSetup.configure(ctx, socks.port, http.port);
             log($"кнопка, Firefox закрыт: ok={closed.ok} «{closed.text}»");
             Assert.True(closed.ok, closed.text);
             Assert.False(closed.restartFirefox, closed.text);
             start($"http://{PROBE}/");
             var viaClosed = await waitFor(reached, WAIT);
-            dump("после кнопки при закрытом Firefox", socks);
-            Assert.True(viaClosed, $"Firefox не пошёл в SOCKS; цели: {string.Join(", ", socks.targets.Distinct())}");
+            dump("после кнопки при закрытом Firefox", http, socks);
+            Assert.True(viaClosed, $"Firefox не пошёл в HTTP-прокси; цели: {string.Join(", ", http.targets.Distinct())}");
             await killAll();
 
             Assert.True(FirefoxSetup.restore(ctx).ok);
-            while (socks.targets.TryDequeue(out _)) { }
+            forget();
 
             // Firefox открыт: нажали кнопку, перезапустили браузер (пункт 18б).
             start("about:blank");
             await waitFor(() => FirefoxSetup.findProfiles().Any(p => FirefoxSetup.profileInUse(p.dir)), WAIT);
-            var open = FirefoxSetup.configure(ctx, socks.port);
+            var open = FirefoxSetup.configure(ctx, socks.port, http.port);
             log($"кнопка, Firefox открыт: ok={open.ok} «{open.text}»");
             Assert.True(open.restartFirefox, open.text);
             await killAll();
             start($"http://{PROBE}/");
             var viaOpen = await waitFor(reached, WAIT);
-            dump("после кнопки при открытом Firefox и перезапуска", socks);
-            Assert.True(viaOpen, $"Firefox после перезапуска не пошёл в SOCKS; цели: {string.Join(", ", socks.targets.Distinct())}");
+            dump("после кнопки при открытом Firefox и перезапуска", http, socks);
+            Assert.True(viaOpen, $"Firefox после перезапуска не пошёл в HTTP-прокси; цели: {string.Join(", ", http.targets.Distinct())}");
             await killAll();
 
             // «Вернуть как было»: Firefox снова мимо нашего порта (пункт 18в).
             Assert.True(FirefoxSetup.restore(ctx).ok);
-            while (socks.targets.TryDequeue(out _)) { }
+            forget();
             start($"http://{PROBE}/");
             await Task.Delay(TimeSpan.FromSeconds(20));
-            dump("после «Вернуть как было»", socks);
+            dump("после «Вернуть как было»", http, socks);
+            Assert.Empty(http.targets);
             Assert.Empty(socks.targets);
         }
         finally

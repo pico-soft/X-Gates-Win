@@ -11,7 +11,8 @@ namespace XGates.App;
  * самого Firefox и только по нажатию:
  *  - профиль — по profiles.ini (профиль по умолчанию каждой установки; есть и вариант Firefox из Microsoft Store);
  *  - прокси — блок в user.js (Firefox применяет его при каждом запуске) с тем же набором настроек, что выставляет
- *    политика Proxy самого Mozilla (ProxyPolicies.sys.mjs): ручной режим, SOCKS5 127.0.0.1:порт, DNS через прокси;
+ *    политика Proxy самого Mozilla (ProxyPolicies.sys.mjs): ручной режим, HTTP и HTTPS на наш HTTP-порт, SOCKS5 на наш
+ *    SOCKS-порт, DNS через прокси. HTTP/HTTPS заполняем, чтобы в настройках Firefox было видно адрес и порт (Elyor 2026-11-01);
  *  - перед первой настройкой запоминаем прежние значения этих настроек из prefs.js — «Вернуть как было» убирает блок и
  *    возвращает их. Возврат — только при ЗАКРЫТОМ Firefox: при выходе он переписывает prefs.js своими значениями.
  * Без запущенного X-Gates такой Firefox сайты не открывает (прокси не отвечает) — это цена варианта Б, о ней говорим.
@@ -124,6 +125,7 @@ public static partial class FirefoxSetup
     internal sealed class State
     {
         public int port { get; set; }
+        public int httpPort { get; set; }
         public List<ProfileState> profiles { get; set; } = [];
     }
 
@@ -156,7 +158,7 @@ public static partial class FirefoxSetup
 
     [GeneratedRegex("^\\s*user_pref\\(\\s*\"(?<name>[^\"]+)\"\\s*,\\s*(?<val>.*?)\\s*\\)\\s*;\\s*$")] private static partial Regex PrefLine();
 
-    internal static string block(int socksPort, string nl) => string.Join(nl,
+    internal static string block(int socksPort, int httpPort, string nl) => string.Join(nl,
     [
         BEGIN,
         "user_pref(\"network.proxy.type\", 1);",
@@ -166,10 +168,10 @@ public static partial class FirefoxSetup
         "user_pref(\"network.proxy.socks_remote_dns\", true);",
         "user_pref(\"network.proxy.socks5_remote_dns\", true);",
         "user_pref(\"network.proxy.share_proxy_settings\", false);",
-        "user_pref(\"network.proxy.http\", \"\");",
-        "user_pref(\"network.proxy.http_port\", 0);",
-        "user_pref(\"network.proxy.ssl\", \"\");",
-        "user_pref(\"network.proxy.ssl_port\", 0);",
+        "user_pref(\"network.proxy.http\", \"127.0.0.1\");",
+        $"user_pref(\"network.proxy.http_port\", {httpPort});",
+        "user_pref(\"network.proxy.ssl\", \"127.0.0.1\");",
+        $"user_pref(\"network.proxy.ssl_port\", {httpPort});",
         END,
     ]) + nl;
 
@@ -194,7 +196,7 @@ public static partial class FirefoxSetup
     // ─────────────────────────── действия ───────────────────────────
 
     /// <summary>«Настроить Firefox»: блок прокси в user.js профиля(ей); прежние значения запоминаются один раз.</summary>
-    public static Outcome configure(Context ctx, int socksPort)
+    public static Outcome configure(Context ctx, int socksPort, int httpPort)
     {
         var found = findProfiles();
         if (found.Count == 0)
@@ -219,22 +221,23 @@ public static partial class FirefoxSetup
             else text = withoutBlock(text, ps.addedNewline);   // уже настроен — обновить блок (напр. новый порт)
             var nl = newlineOf(text);
             ps.addedNewline = text.Length > 0 && !text.EndsWith('\n');
-            File.WriteAllText(userJs, text + (ps.addedNewline ? nl : "") + block(socksPort, nl), Utf8NoBom);
+            File.WriteAllText(userJs, text + (ps.addedNewline ? nl : "") + block(socksPort, httpPort, nl), Utf8NoBom);
             running |= profileInUse(p.dir);
         }
         state.port = socksPort;
+        state.httpPort = httpPort;
         saveState(ctx, state);
         var names = string.Join(", ", found.Select(p => $"«{p.name}»"));
-        return new Outcome(true, $"Firefox настроен на X-Gates (SOCKS5 127.0.0.1:{socksPort}, DNS через прокси), профиль {names}. " +
+        return new Outcome(true, $"Firefox настроен на X-Gates (HTTP и HTTPS 127.0.0.1:{httpPort}, SOCKS5 127.0.0.1:{socksPort}), профиль {names}. " +
             (running ? RESTART_TEXT : "Откройте Firefox."), running);
     }
 
     /// <summary>Порт сменили в настройках X-Gates — переписать блок, если Firefox настроен нами.</summary>
-    public static Outcome? refreshPort(Context ctx, int socksPort)
+    public static Outcome? refreshPort(Context ctx, int socksPort, int httpPort)
     {
         var state = loadState(ctx);
-        if (state is not { profiles.Count: > 0 } || state.port == socksPort) return null;
-        return configure(ctx, socksPort);
+        if (state is not { profiles.Count: > 0 } || (state.port == socksPort && state.httpPort == httpPort)) return null;
+        return configure(ctx, socksPort, httpPort);
     }
 
     /// <summary>«Вернуть как было»: убрать блок из user.js и вернуть прежние значения в prefs.js. Firefox должен быть закрыт.</summary>
@@ -275,13 +278,13 @@ public static partial class FirefoxSetup
     }
 
     /// <summary>Строка состояния под кнопками.</summary>
-    public static string statusText(Context ctx, int socksPort)
+    public static string statusText(Context ctx, int socksPort, int httpPort)
     {
         var st = loadState(ctx);
         if (st is { profiles.Count: > 0 })
-            return st.port == socksPort
-                ? $"Firefox настроен на X-Gates (SOCKS5 127.0.0.1:{socksPort}), настройка действует после перезапуска Firefox. Пока X-Gates не запущен, Firefox сайты не откроет — тогда «Вернуть как было»."
-                : $"Firefox настроен на старый порт {st.port} — нажмите «Настроить Firefox» ещё раз.";
+            return st.port == socksPort && st.httpPort == httpPort
+                ? $"Firefox настроен на X-Gates (HTTP и HTTPS 127.0.0.1:{httpPort}, SOCKS5 127.0.0.1:{socksPort}), настройка действует после перезапуска Firefox. Пока X-Gates не запущен, Firefox сайты не откроет — тогда «Вернуть как было»."
+                : "Настройка Firefox устарела — нажмите «Настроить Firefox» ещё раз.";
         var found = findProfiles();
         return found.Count == 0
             ? "Firefox не найден. Установите Firefox и запустите его один раз."

@@ -225,18 +225,27 @@
                     <Grid Margin="0,8,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="90" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="80" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
-                            <RowDefinition /><RowDefinition />
+                            <RowDefinition /><RowDefinition /><RowDefinition />
                         </Grid.RowDefinitions>
-                        <TextBlock Grid.Row="0" Text="SOCKS5   127.0.0.1 :" VerticalAlignment="Center" Margin="0,0,6,4" />
-                        <TextBox Grid.Row="0" Grid.Column="1" x:Name="SocksPort" Margin="0,0,0,4" />
-                        <Button Grid.Row="0" Grid.Column="2" Content="Копировать" Click="OnCopySocks" HorizontalAlignment="Left" Margin="8,0,0,4" Padding="8,1" />
-                        <TextBlock Grid.Row="1" Text="HTTP       127.0.0.1 :" VerticalAlignment="Center" Margin="0,0,6,0" />
-                        <TextBox Grid.Row="1" Grid.Column="1" x:Name="HttpPort" />
-                        <Button Grid.Row="1" Grid.Column="2" Content="Копировать" Click="OnCopyHttp" HorizontalAlignment="Left" Margin="8,0,0,0" Padding="8,1" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="Адрес" Foreground="{StaticResource Gray}" Margin="0,0,0,2" />
+                        <TextBlock Grid.Row="0" Grid.Column="3" Text="Порт" Foreground="{StaticResource Gray}" Margin="0,0,0,2" />
+                        <TextBlock Grid.Row="1" Text="SOCKS5" VerticalAlignment="Center" Margin="0,0,12,4" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Text="127.0.0.1" VerticalAlignment="Center" Margin="0,0,0,4" />
+                        <Button Grid.Row="1" Grid.Column="2" Content="Копировать" Click="OnCopyAddress" Margin="8,0,16,4" Padding="8,1" />
+                        <TextBox Grid.Row="1" Grid.Column="3" x:Name="SocksPort" Margin="0,0,0,4" />
+                        <Button Grid.Row="1" Grid.Column="4" Content="Копировать" Click="OnCopySocks" Margin="8,0,0,4" Padding="8,1" />
+                        <TextBlock Grid.Row="2" Text="HTTP и HTTPS" VerticalAlignment="Center" Margin="0,0,12,0" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="127.0.0.1" VerticalAlignment="Center" />
+                        <Button Grid.Row="2" Grid.Column="2" Content="Копировать" Click="OnCopyAddress" Margin="8,0,16,0" Padding="8,1" />
+                        <TextBox Grid.Row="2" Grid.Column="3" x:Name="HttpPort" />
+                        <Button Grid.Row="2" Grid.Column="4" Content="Копировать" Click="OnCopyHttp" Margin="8,0,0,0" Padding="8,1" />
                     </Grid>
                     <WrapPanel Margin="0,8,0,0">
                         <Button Content="Применить порты" Click="OnApplyPorts" />
@@ -250,8 +259,31 @@
                         <Button Content="Вернуть как было" Click="OnFirefoxRestore" />
                     </WrapPanel>
                     <TextBlock x:Name="FirefoxStatus" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{StaticResource Gray}" />
+
+                    <!-- Как в Android (BrowserSetupSection): сервер и порт копируются отдельно и видны сразу. -->
+                    <TextBlock Style="{StaticResource Section}" Margin="0,10,0,6" Text="Telegram" />
+                    <TextBlock TextWrapping="Wrap"
+                               Text="Настройки → Продвинутые настройки → Тип соединения → «Использовать собственный прокси» → SOCKS5. Впишите сервер и порт:" />
+                    <Grid Margin="0,6,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition /><RowDefinition />
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Text="Сервер" VerticalAlignment="Center" Margin="0,0,12,4" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="127.0.0.1" VerticalAlignment="Center" Margin="0,0,0,4" />
+                        <Button Grid.Row="0" Grid.Column="2" Content="Копировать" Click="OnCopyAddress" Margin="8,0,0,4" Padding="8,1" />
+                        <TextBlock Grid.Row="1" Text="Порт" VerticalAlignment="Center" Margin="0,0,12,0" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" x:Name="TelegramPort" VerticalAlignment="Center" />
+                        <Button Grid.Row="1" Grid.Column="2" Content="Копировать" Click="OnCopySocks" Margin="8,0,0,0" Padding="8,1" />
+                    </Grid>
+                    <TextBlock Foreground="{StaticResource Gray}" Margin="0,4,0,0" Text="Логин и пароль оставьте пустыми." />
                     <!-- Как направить программы в наш прокси (аналог BrowserSetupSection Android). Системный прокси НЕ трогаем. -->
-                    <Expander Header="Как подключить браузер и Telegram" Margin="0,8,0,0" FontWeight="Bold">
+                    <Expander Header="Как подключить другие программы" Margin="0,8,0,0" FontWeight="Bold">
                         <TextBox x:Name="HowToText" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent"
                                  FontWeight="Normal" Margin="0,6,0,0" />
                     </Expander>

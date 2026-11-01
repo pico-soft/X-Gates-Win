@@ -56,13 +56,13 @@ public sealed class FirefoxSetupTests : IDisposable
         var p = Assert.Single(FirefoxSetup.findProfiles());
         Assert.Equal(Path.GetFullPath(profile), p.dir);
         Assert.Equal("default-release", p.name);
-        Assert.Contains("«default-release»", FirefoxSetup.statusText(ctx, 10815));
+        Assert.Contains("«default-release»", FirefoxSetup.statusText(ctx, 10815, 10816));
     }
 
     [Fact]
     public void Configure_adds_block_keeps_user_lines_and_restore_returns_exact_previous_state()
     {
-        var r = FirefoxSetup.configure(ctx, 10815);
+        var r = FirefoxSetup.configure(ctx, 10815, 10816);
         Assert.True(r.ok, r.text);
         Assert.StartsWith(USERJS_BEFORE + "\n", UserJs);   // строки пользователя целы, блок — с новой строки
         Assert.Contains("user_pref(\"network.proxy.type\", 1);", UserJs);
@@ -70,9 +70,12 @@ public sealed class FirefoxSetupTests : IDisposable
         Assert.Contains("user_pref(\"network.proxy.socks_port\", 10815);", UserJs);
         Assert.Contains("user_pref(\"network.proxy.socks_version\", 5);", UserJs);
         Assert.Contains("user_pref(\"network.proxy.socks5_remote_dns\", true);", UserJs);
-        Assert.Contains("user_pref(\"network.proxy.http\", \"\");", UserJs);   // корпоративный HTTP-прокси не перехватит
+        Assert.Contains("user_pref(\"network.proxy.http\", \"127.0.0.1\");", UserJs);
+        Assert.Contains("user_pref(\"network.proxy.http_port\", 10816);", UserJs);
+        Assert.Contains("user_pref(\"network.proxy.ssl\", \"127.0.0.1\");", UserJs);
+        Assert.Contains("user_pref(\"network.proxy.ssl_port\", 10816);", UserJs);
         Assert.True(FirefoxSetup.isConfigured(ctx));
-        Assert.Contains("настроен на X-Gates", FirefoxSetup.statusText(ctx, 10815));
+        Assert.Contains("настроен на X-Gates", FirefoxSetup.statusText(ctx, 10815, 10816));
 
         // Firefox поработал с блоком и при выходе записал его значения в prefs.js (как он делает с user.js).
         File.WriteAllText(Path.Combine(profile, "prefs.js"),
@@ -82,11 +85,13 @@ public sealed class FirefoxSetupTests : IDisposable
             "user_pref(\"network.proxy.type\", 1);\n");
 
         // Смена порта в X-Gates → блок переписан, прежние значения (резервная копия) НЕ перезаписаны нашими.
-        Assert.NotNull(FirefoxSetup.refreshPort(ctx, 20815));
+        Assert.NotNull(FirefoxSetup.refreshPort(ctx, 20815, 10816));
         Assert.Contains("user_pref(\"network.proxy.socks_port\", 20815);", UserJs);
         Assert.DoesNotContain("10815", UserJs);
         Assert.Single(System.Text.RegularExpressions.Regex.Matches(UserJs, "X-Gates Win: Firefox proxy"));
-        Assert.Null(FirefoxSetup.refreshPort(ctx, 20815));   // тот же порт — ничего
+        Assert.Null(FirefoxSetup.refreshPort(ctx, 20815, 10816));   // те же порты — ничего
+        Assert.NotNull(FirefoxSetup.refreshPort(ctx, 20815, 20816));   // сменился только HTTP — тоже переписать
+        Assert.Contains("user_pref(\"network.proxy.ssl_port\", 20816);", UserJs);
 
         var back = FirefoxSetup.restore(ctx);
         Assert.True(back.ok, back.text);
@@ -104,7 +109,7 @@ public sealed class FirefoxSetupTests : IDisposable
     public void Restore_refuses_while_firefox_is_open_and_new_userjs_is_removed()
     {
         File.Delete(Path.Combine(profile, "user.js"));
-        var closed = FirefoxSetup.configure(ctx, 10815);
+        var closed = FirefoxSetup.configure(ctx, 10815, 10816);
         Assert.True(closed.ok);
         Assert.False(closed.restartFirefox);                               // закрыт — просто открыть
         Assert.DoesNotContain(FirefoxSetup.RESTART_TEXT, closed.text);
@@ -113,7 +118,7 @@ public sealed class FirefoxSetupTests : IDisposable
         using (new FileStream(Path.Combine(profile, "parent.lock"), FileMode.Create, FileAccess.ReadWrite, FileShare.None))
         {
             Assert.True(FirefoxSetup.profileInUse(profile));
-            var open = FirefoxSetup.configure(ctx, 10815);                  // настроить можно и при открытом
+            var open = FirefoxSetup.configure(ctx, 10815, 10816);                  // настроить можно и при открытом
             Assert.True(open.restartFirefox);
             Assert.Contains(FirefoxSetup.RESTART_TEXT, open.text);
             var r = FirefoxSetup.restore(ctx);
@@ -131,7 +136,7 @@ public sealed class FirefoxSetupTests : IDisposable
     public void No_firefox_says_so()
     {
         FirefoxSetup.roots = () => [Path.Combine(root, "nothing")];
-        var r = FirefoxSetup.configure(ctx, 10815);
+        var r = FirefoxSetup.configure(ctx, 10815, 10816);
         Assert.False(r.ok);
         Assert.Contains("Firefox не найден", r.text);
         Assert.False(FirefoxSetup.isConfigured(ctx));
