@@ -74,6 +74,7 @@ public partial class MainWindow : Window
             if (Tabs.SelectedItem == SettingsTab) loadSettings();
         };
         StateChanged += (_, _) => { if (WindowState == WindowState.Minimized) minimized?.Invoke(); else restored?.Invoke(); };
+        Title = $"{AppInfo.APP_NAME} {AppInfo.VERSION_NAME}";
         LiveList.ItemsSource = liveRows; PrevList.ItemsSource = prevRows; AllList.ItemsSource = allRows;
         SourcesList.ItemsSource = sourceRows;
         render();
