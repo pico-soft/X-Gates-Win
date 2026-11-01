@@ -181,8 +181,32 @@ public sealed class OutageRecoveryTests : IDisposable
 
         NetworkMonitor.optimizeToFastest(ctx, SettingsStore.current()).Wait();
 
-        Assert.Equal(SubscriptionManager.serverKey(active), ProxyState.state.value.serverKey);
+        Assert.NotEqual(ghost, ProxyState.state.value.serverKey);
         Assert.Equal(-1, SubscriptionManager.allServers(ctx).First(it => SubscriptionManager.serverKey(it) == ghost).pingMs);   // ушёл из «Живых»
+    }
+
+    [Theory]
+    [InlineData(4.0, false)]   // повторный замер: разрыв был шумом, живой туннель остаётся
+    [InlineData(1.1, true)]    // разрыв подтвердился
+    public void Live_tunnel_is_left_only_after_the_gap_is_confirmed(double curAgain, bool switches)
+    {
+        var servers = Import(net.StartVlessServer(), net.StartVlessServer());
+        var active = servers.First(it => it.remarks == "srv0");
+        var other = servers.First(it => it.remarks == "srv1");
+        SubscriptionManager.applyPingResults(ctx, servers.ToDictionary(SubscriptionManager.serverKey, _ => 20));
+        var curMeasures = new Queue<double>([1.0, curAgain]);
+        var saved = NetworkMonitor.measureEnough;
+        NetworkMonitor.measureEnough = (_, p, _) => p.remarks == "srv0" ? curMeasures.Dequeue() : 5.0;
+        try
+        {
+            Start(active);
+            NetworkMonitor.optimizeToFastest(ctx, SettingsStore.current()).Wait();
+            var expected = SubscriptionManager.serverKey(switches ? other : active);
+            Assert.True(WaitUntil(() => ProxyState.state.value.serverKey == expected, 5_000), ProxyState.state.value.serverKey);
+            Thread.Sleep(500);
+            Assert.Equal(expected, ProxyState.state.value.serverKey);
+        }
+        finally { NetworkMonitor.measureEnough = saved; }
     }
 
     [Fact]

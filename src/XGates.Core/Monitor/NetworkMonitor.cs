@@ -919,6 +919,9 @@ public static class NetworkMonitor
         }
     }
 
+    /// <summary>Короткий замер для решений «держать лучший» (подменяется в тестах: настоящий на стенде шумит).</summary>
+    internal static Func<Context, ServerProfile, double, double> measureEnough = ServerSpeedTester.measureSufficiency;
+
     /// <summary>Фоновая работа уступает ручному тесту и восстановлению связи.</summary>
     private static bool backgroundMustYield() =>
         MonitorCoordinator.fullTestRunning || ProxyState.state.value.serverKey == null || TunnelHealth.snapshot().phase == TunnelHealth.Phase.RECOVERING;
@@ -1323,7 +1326,7 @@ public static class NetworkMonitor
             // переключимся, лишь когда текущий перестал быть достаточным (порог/низкий → ×N сработает).
             var enough = s.sufficientMbps.coerceAtLeast(0.1);
             var curProfile = all.FirstOrDefault(it => key(it) == curKey);
-            var curMbps = curProfile != null ? ServerSpeedTester.measureSufficiency(app, curProfile, enough) : -1.0;
+            var curMbps = curProfile != null ? measureEnough(app, curProfile, enough) : -1.0;
             var results = new Dictionary<string, double>();
             if (curMbps > 0) results[curKey] = curMbps;
             string? bestKey = null; var bestMbps = 0.0;
@@ -1333,7 +1336,7 @@ public static class NetworkMonitor
                 if (ProxyState.state.value.serverKey != curKey) return Task.CompletedTask;       // пользователь сменил — уступаем
                 var k = key(c);
                 if (k == curKey) continue;
-                var mbps = ServerSpeedTester.measureSufficiency(app, c, enough);   // temp-инстанс, стоп на пороге
+                var mbps = measureEnough(app, c, enough);   // temp-инстанс, стоп на пороге
                 results[k] = mbps;
                 // Пр.146 Ф3.5: не переходим НА нестабильный сервер (Ф3) — он не может стать «лучшим» целевым.
                 if (mbps > bestMbps && !isUnstableKey(k)) { bestMbps = mbps; bestKey = k; }
@@ -1346,7 +1349,7 @@ public static class NetworkMonitor
             if (bestStored != null)
             {
                 var k = key(bestStored);
-                var mbps = ServerSpeedTester.measureSufficiency(app, bestStored, enough);
+                var mbps = measureEnough(app, bestStored, enough);
                 if (backgroundMustYield() || ProxyState.state.value.serverKey != curKey) return Task.CompletedTask;
                 results[k] = mbps;
                 if (mbps > bestMbps) { bestMbps = mbps; bestKey = k; }
@@ -1356,6 +1359,10 @@ public static class NetworkMonitor
             SubscriptionManager.applySpeedResults(app, results);
             // ПРАВИЛО «ДЕРЖАТЬ ЛУЧШИЙ» (Промпт 90.A): переключаемся, если лучший быстрее текущего КРАТНО
             // (в keepBestMultiplier раз), даже когда текущий выше порога. Кратно — чтобы шум не дёргал.
+            // Короткий замер шумит: на стенде два одинаковых сервера показали разницу больше ×3. Перед тем как рвать живой туннель,
+            // перемеряем текущий и уходим, только если разрыв подтвердился (правило Elyor: только если уверены).
+            if (bestKey != null && bestKey != curKey && curMbps > 0 && bestMbps >= curMbps * s.keepBestMultiplier)
+                curMbps = Math.Max(curMbps, measureEnough(app, curProfile!, enough));
             if (bestKey != null && bestKey != curKey && curMbps > 0 && bestMbps >= curMbps * s.keepBestMultiplier)
             {
                 if (backgroundMustYield() || ProxyState.state.value.serverKey != curKey) return Task.CompletedTask;
