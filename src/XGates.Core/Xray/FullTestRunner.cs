@@ -97,7 +97,7 @@ public static class FullTestRunner
             if (Volatile.Read(ref cancelled)) { finishOnce(new Result(null, null, 0.0, aliveByPing.Count, true)); return; }
             if (aliveByPing.Count == 0)
             {
-                onPhase("Нет живых серверов — проверь интернет / все мёртвые");
+                onPhase("Рабочих серверов нет. Проверьте интернет");
                 finishOnce(new Result(null, null, 0.0, 0, Volatile.Read(ref cancelled)));
                 return;
             }
@@ -119,7 +119,7 @@ public static class FullTestRunner
             // равно на scanGoodTarget(10) ИЛИ бюджете — обычно набирается рано (живые фронт-загружены).
             var maxScan = (s.trafficSaveMode ? 30 : 180).coerceAtMost(candidates.Count);
             var budgetMs = s.fullTestBudgetSec.coerceAtLeast(30) * 1000L;
-            onPhase("Этап 2: быстрый замер (ищу живые)…");
+            onPhase("Ищу самые быстрые серверы…");
             emitProgress(0, maxScan);
 
             // Промпт 103. ПРЕДОХРАНИТЕЛЬ ЗАВЕРШЕНИЯ. Наблюдение из поля: «Этап 2» долго стоял, плашка зеленела
@@ -148,8 +148,8 @@ public static class FullTestRunner
                         try
                         {
                             onPhase(overBudget
-                                ? $"Бюджет теста ({s.fullTestBudgetSec / 60} мин) исчерпан — завершаю"
-                                : $"Замер завис ({STALL_LIMIT_MS / 1000}с без движения) — завершаю");
+                                ? "Время проверки вышло, завершаю…"
+                                : "Проверка не двигается, завершаю…");
                         }
                         catch (Exception) { }
                         finishOnce(new Result(Volatile.Read(ref hbConnected) ?? Volatile.Read(ref hbBest), Volatile.Read(ref hbBest), 0.0, candidates.Count, false));
@@ -179,7 +179,7 @@ public static class FullTestRunner
                     var activeServerKey = ProxyState.state.value.serverKey;
                     if (ProxyState.state.value.running && activeServerKey != null)
                     {
-                        onPhase("Этап 2: замер активного туннеля…");
+                        onPhase("Проверяю текущий сервер…");
                         beat();
                         // Промпт 104.B: отдача (↑) — display-only и сток → не делаем. Промпт 108: замер на отдельном
                         // потоке с потолком. Промпт 109: ЭТОТ живой замер — ТОЛЬКО для «живой» ↓/↑ на плашке; в РЕШЕНИЕ
@@ -210,18 +210,18 @@ public static class FullTestRunner
                         var activePaused = activeProfile != null && ServerFilter.isPaused(activeProfile, blocklist);
                         if (activePaused)
                         {
-                            onPhase($"Активный {label(activeProfile!)} отложен («Не использовать») — ищу замену");
+                            onPhase("Ищу замену текущему серверу…");
                         }
                         else if (activeProfile != null && activeMbps >= s.monitorTunnelThreshold)
                         {
                             connected = activeProfile; connectedSpeed = activeMbps; Volatile.Write(ref hbConnected, activeProfile); keepActive = true;
-                            onPhase($"Активный {label(activeProfile)}: ↓{fmt(activeMbps)} Мбит/с (в норме) — переключусь только если кандидат ×{fmt(s.keepBestMultiplier)} быстрее");
+                            onPhase("Текущий сервер работает, ищу быстрее…");
                         }
                         else
                         {
                             onPhase(activeMbps <= 0.0
-                                ? "Активный туннель не измерился — ищу рабочий сервер"
-                                : $"Активный ↓{fmt(activeMbps)} < порога {fmt(s.monitorTunnelThreshold)} Мбит/с — ищу быстрее");
+                                ? "Текущий сервер не отвечает, ищу рабочий…"
+                                : "Текущий сервер медленный, ищу быстрее…");
                         }
                     }
                     foreach (var p in candidates)
@@ -230,12 +230,12 @@ public static class FullTestRunner
                         // Общий бюджет времени (Промпт 82): не мерим бесконечно — стоп по лимиту.
                         if ((JavaSystem.nanoTime() - phaseStart) / 1_000_000 > budgetMs)
                         {
-                            onPhase($"Бюджет теста ({s.fullTestBudgetSec / 60} мин) исчерпан на {measured} — стоп");
+                            onPhase("Время проверки вышло, завершаю…");
                             break;
                         }
                         // Набрали топ годных ИЛИ просканировали потолок (пул мёртвый) → хватит минимального.
-                        if (goodOnes.Count >= scanGoodTarget) { onPhase($"Набрано {scanGoodTarget} живых — к точному замеру топа"); break; }
-                        if (measured >= maxScan) { onPhase($"Просканировано {measured}, годных {goodOnes.Count} — к точному замеру топа"); break; }
+                        if (goodOnes.Count >= scanGoodTarget) { onPhase("Рабочие серверы найдены, сравниваю скорость…"); break; }
+                        if (measured >= maxScan) { onPhase("Сравниваю скорость найденных серверов…"); break; }
                         // Активный уже измерен ПОЛНЫМ выше — минимально не перемеряем (число не затирается на «≈»); не в счёт.
                         if (activeServerKey != null && key(p) == activeServerKey) continue;
                         // МИНИМАЛЬНЫЙ замер (~100 КБ, 1 пробник/3с — быстро падает на мёртвых). От лучшего пинга к худшему.
@@ -252,13 +252,13 @@ public static class FullTestRunner
                             if (connected == null)
                             {
                                 connected = p; connectedSpeed = mbps; Volatile.Write(ref hbConnected, p);
-                                onPhase($"Подключён {label(p)} ({fmt(mbps)} Мбит/с), продолжаю замер…");
+                                onPhase($"Подключено: {label(p)}. Ищу быстрее…");
                                 var from = ServerLabels.displayForKey(appCtx, ProxyState.state.value.serverKey);
                                 MonitorLog.@switch(appCtx, from, ServerLabels.display(p), "полный тест: первый рабочий", $"{fmt(mbps)} Мбит/с");
                                 connect(p);
                             }
                         }
-                        onPhase($"Этап 2: замер {measured}/{candidates.Count} · живых {goodOnes.Count} · пробник {ServerSpeedTester.activeProbeHost.IfBlank("…")} · подключён: {(connected != null ? label(connected) : "—")}");
+                        onPhase($"Проверено серверов: {measured} · рабочих: {goodOnes.Count}");
                         emitProgress(measured, maxScan);
                         beat();   // Промпт 103: шаг прогресса — «пульс» для сторожа
                     }
@@ -271,7 +271,7 @@ public static class FullTestRunner
                         var topK = goodOnes.DistinctBy(key)
                             .OrderByDescending(it => minimalByKey.GetValueOrDefault(key(it), 0.0))   // по МИНИМАЛЬНОМУ замеру этого прогона
                             .Take(fullCap).ToList();
-                        onPhase($"Этап 3: точный замер топа ({topK.Count})…");
+                        onPhase($"Сравниваю скорость лучших серверов: {topK.Count}…");
                         foreach (var p in topK)
                         {
                             if (Volatile.Read(ref cancelled)) break;
@@ -289,7 +289,7 @@ public static class FullTestRunner
                         var need = keepActive ? connectedSpeed * s.keepBestMultiplier : connectedSpeed * (1 + margin);
                         if (!Volatile.Read(ref cancelled) && pick != null && (conn == null || (key(pick) != key(conn) && bestFull > need)))
                         {
-                            onPhase($"Точный топ: {label(pick)} {fmt(bestFull)} Мбит/с — переключаюсь");
+                            onPhase($"Нашёлся быстрее: {label(pick)}, переключаюсь…");
                             var from = ServerLabels.displayForKey(appCtx, ProxyState.state.value.serverKey);
                             MonitorLog.@switch(appCtx, from, ServerLabels.display(pick), "полный тест: точный топ", $"было {fmt(connectedSpeed)} → стало {fmt(bestFull)} Мбит/с");
                             connected = pick; connectedSpeed = bestFull; Volatile.Write(ref hbConnected, pick);
@@ -299,7 +299,8 @@ public static class FullTestRunner
                 }
                 catch (Exception e)
                 {
-                    try { onPhase($"Ошибка теста: {e.GetType().Name}: {e.Message}"); } catch (Exception) { }
+                    Log.w("FullTestRunner", "тест прервался", e);
+                    try { onPhase("Проверка прервалась из-за ошибки"); } catch (Exception) { }
                 }
                 finishOnce(new Result(connected ?? best, best, bestSpeed, candidates.Count, Volatile.Read(ref cancelled)));
             }, "fulltest-speed");
@@ -310,13 +311,13 @@ public static class FullTestRunner
         var race = !FirstAliveRace.tunnelNeeded() ? null : new FirstAliveRace(appCtx, p =>
         {
             if (Volatile.Read(ref cancelled)) return;
-            onPhase($"Подключён {label(p)}, ищу быстрее…");
+            onPhase($"Подключено: {label(p)}. Ищу быстрее…");
             MonitorLog.@switch(appCtx, ServerLabels.displayForKey(appCtx, ProxyState.state.value.serverKey), ServerLabels.display(p), "полный тест: первый живой");
             connect(p);
         });
 
         // --- Этап 1: ping всех (кроме заблокированных) — нужен для ранжирования, дёшев ---
-        onPhase($"Этап 1: пинг {testable.Count}…");
+        onPhase("Проверяю серверы…");
         emitProgress(0, testable.Count);
         pingHandle = ServerTester.testAll(
             context: appCtx,
@@ -331,7 +332,7 @@ public static class FullTestRunner
             },
             onProgress: (done, total) =>
             {
-                onPhase($"Этап 1: пинг {done} / {total}");
+                onPhase($"Проверяю серверы: {done} из {total}");
                 emitProgress(done, total);
             },
             onFinish: () =>

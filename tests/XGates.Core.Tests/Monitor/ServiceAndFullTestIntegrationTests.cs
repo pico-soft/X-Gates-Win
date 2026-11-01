@@ -201,8 +201,8 @@ public sealed class ServiceAndFullTestIntegrationTests : IDisposable
         Assert.NotEqual("srv0", result.connected!.remarks);        // srv0 — мёртвый порт
         Assert.DoesNotContain("srv0", connected);
         Assert.True(WaitUntil(() => ProxyState.state.value.running, 10_000), "после теста прокси поднят");
-        Assert.Contains(phases, ph => ph.StartsWith("Этап 1"));
-        Assert.Contains(phases, ph => ph.StartsWith("Этап 3"));
+        Assert.Contains(phases, ph => ph.StartsWith("Проверяю серверы"));
+        Assert.Contains(phases, ph => ph.StartsWith("Сравниваю скорость"));
         XrayProxyService.stop(ctx);
         Assert.True(WaitUntil(() => !PortOpen(10815), 10_000));
     }
