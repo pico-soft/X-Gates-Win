@@ -30,6 +30,18 @@ public static class StatsModel
     public static IReadOnlyList<(string kind, string line, string detail)> journal() =>
         MonitorLog.state.value.AsEnumerable().Reverse().Select(e => (e.kind, $"{monitorTime(e.ts)} · {e.text}", e.detail)).ToList();
 
+    /// <summary>Журнал целиком текстом для «Скопировать журнал»: версия и время, затем события, свежие сверху.</summary>
+    public static string journalText(long nowMs)
+    {
+        var lines = new List<string> { $"X-Gates Win {XGates.Core.AppInfo.VERSION_NAME}, {monitorTime(nowMs)}" };
+        foreach (var (_, line, detail) in journal())
+        {
+            lines.Add(line);
+            if (detail.Length > 0) lines.Add("  " + detail);
+        }
+        return string.Join(Environment.NewLine, lines);
+    }
+
     public static string journalTitle() => $"Журнал событий ({MonitorLog.state.value.Count})";
 
     public const string JOURNAL_EMPTY = "Происшествий не было — журнал пуст. Здесь появятся падения, восстановления и смены сервера.";

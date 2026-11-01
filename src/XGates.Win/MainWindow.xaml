@@ -310,6 +310,7 @@
                     <StackPanel x:Name="OptimizePanel" />
                     <DockPanel Margin="0,8,0,4">
                         <Button DockPanel.Dock="Right" Content="Очистить" Click="OnClearJournal" Padding="8,1" Margin="0" />
+                        <Button DockPanel.Dock="Right" Content="Скопировать журнал" Click="OnCopyJournal" Padding="8,1" Margin="0,0,6,0" />
                         <TextBlock x:Name="JournalTitle" FontWeight="Bold" VerticalAlignment="Center" />
                     </DockPanel>
                     <StackPanel x:Name="JournalPanel" />

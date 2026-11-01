@@ -565,6 +565,7 @@ public partial class MainWindow : Window
 
     private void OnClearJournal(object sender, RoutedEventArgs e) { MonitorLog.clear(ctx); renderStats(); }
     private void OnResetTrafficSession(object sender, RoutedEventArgs e) { TrafficTracker.resetSession(); renderStats(); }
+    private void OnCopyJournal(object sender, RoutedEventArgs e) => copyAndConfirm(sender, StatsModel.journalText(JavaSystem.currentTimeMillis()));
     private void OnResetTrafficToday(object sender, RoutedEventArgs e)
     {
         if (MessageBox.Show(this, StatsModel.resetTodayText(TrafficTracker.state.value), "Сбросить за сутки?", MessageBoxButton.OKCancel) == MessageBoxResult.OK)

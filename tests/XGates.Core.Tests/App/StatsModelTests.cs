@@ -38,6 +38,11 @@ public sealed class StatsModelTests : IDisposable
         Assert.Equal("Журнал событий (0)", StatsModel.journalTitle());
         MonitorLog.@event(ctx, "net", "Сеть сменилась", "Wi-Fi");
         MonitorLog.@event(ctx, "switch", "Прокси остановлен", "ручная остановка");
+        var text = StatsModel.journalText(JavaSystem.currentTimeMillis());
+        Assert.StartsWith("X-Gates Win ", text);
+        Assert.Contains("Прокси остановлен", text);
+        Assert.Contains("  ручная остановка", text);
+        Assert.Contains("  Wi-Fi", text);
         var j = StatsModel.journal();
         Assert.Equal(2, j.Count);
         Assert.EndsWith(" · Прокси остановлен", j[0].line);   // свежие сверху
