@@ -310,8 +310,9 @@ public static class ServerSpeedTester
     /**
      * Жив ли сервер по РЕАЛЬНОЙ передаче: поднять temp-инстанс на эфемерном порту, скачать несколько КБ
      * через его socks. true — пришло ≥ [PROBE_ALIVE_MIN_BYTES]. Не трогает активный прокси. Трафик → «Тест».
+     * [maxProbes]/[timeoutMs] — короче обычного, когда важна скорость ответа, а не честность приговора серверу.
      */
-    public static bool probeAlive(Context context, ServerProfile profile)
+    public static bool probeAlive(Context context, ServerProfile profile, int maxProbes = int.MaxValue, int timeoutMs = PROBE_ALIVE_TIMEOUT_MS)
     {
         XrayController.ensureEnv(context);
         var verbose = SettingsStore.current().verboseLogs;
@@ -339,9 +340,9 @@ public static class ServerSpeedTester
                 }
                 var proxy = new HttpRoute.Socks("127.0.0.1", port.Value);
                 var testBytes = 0L;
-                foreach (var probe in probes)
+                foreach (var probe in probes.Take(maxProbes))
                 {
-                    var got = downloadSome(probe, proxy, PROBE_ALIVE_TARGET_BYTES, PROBE_ALIVE_TIMEOUT_MS);
+                    var got = downloadSome(probe, proxy, PROBE_ALIVE_TARGET_BYTES, timeoutMs);
                     testBytes += got;
                     if (got >= PROBE_ALIVE_MIN_BYTES)
                     {

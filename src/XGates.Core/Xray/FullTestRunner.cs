@@ -12,7 +12,8 @@ namespace XGates.Core.Xray;
 /**
  * Полный адаптивный тест (новый ЕДИНЫЙ порядок, ТЗ Elyor 2026-10-14). Порт 1:1 с xray/FullTestRunner.kt.
  *   Этап 0: ФЕТЧ подписок из сети (свежий список) — делает вызывающий (onFullTest) ДО run.
- *   Этап 1: ping ВСЕХ → отсев мёртвых (pingMs>=0), сорт по возр. пинга.
+ *   Этап 1: ping ВСЕХ → отсев мёртвых (pingMs>=0), сорт по возр. пинга. Пока связи нет, откликнувшиеся сразу идут в
+ *           [FirstAliveRace]: первый передавший данные становится активным, не дожидаясь конца пинга (ТЗ Elyor 2026-11-01).
  *   Этап 2: МИНИМАЛЬНЫЙ замер (~100 КБ) ВСЕХ живых. У кого throughput ≥ minGate (0.5 Мбит/с) — кандидат на точный
  *           замер; к ПЕРВОМУ живому сразу подключаемся (непрерывность, Пр.95). В «Живых» эти числа — «≈» (быстрые).
  *   Этап 3: ПОЛНЫЙ точный замер ТОПа прошедших minGate — лимит fullCap: 10 (обычный)/3 (экономия).
@@ -33,6 +34,11 @@ public static class FullTestRunner
     // Пр.151: сколько ГОДНЫХ набрать на быстром Этапе 2 (после подключения) прежде чем перейти к точному Этапу 3.
     // Хватает пула для точного замера топ-K; не мерим все десятки серверов подряд.
     private const int FAST_SCAN_ENOUGH = 10;
+    // TCP-коннект ничего не стоит, а ждёт таймаута на каждом мёртвом адресе: при тысяче серверов и 16 потоках пинг шёл минуты.
+    private const int PING_CONCURRENCY = 48;
+    // Сколько после конца пинга ещё даём гонке за первый живой, прежде чем идти к последовательным замерам.
+    private static readonly TimeSpan RACE_WAIT = TimeSpan.FromSeconds(60);
+    private const long RACE_CONNECT_WAIT_MS = 8_000L;
 
     public sealed record Result(
         ServerProfile? connected,   // к чему подключены в итоге
@@ -299,18 +305,29 @@ public static class FullTestRunner
             }, "fulltest-speed");
         }
 
+        // Связь нужна сейчас: гонка принимает откликнувшихся прямо во время пинга.
+        var raceSettings = SettingsStore.current();
+        var race = !FirstAliveRace.tunnelNeeded() ? null : new FirstAliveRace(appCtx, p =>
+        {
+            if (Volatile.Read(ref cancelled)) return;
+            onPhase($"Подключён {label(p)}, ищу быстрее…");
+            MonitorLog.@switch(appCtx, ServerLabels.displayForKey(appCtx, ProxyState.state.value.serverKey), ServerLabels.display(p), "полный тест: первый живой");
+            connect(p);
+        });
+
         // --- Этап 1: ping всех (кроме заблокированных) — нужен для ранжирования, дёшев ---
         onPhase($"Этап 1: пинг {testable.Count}…");
         emitProgress(0, testable.Count);
         pingHandle = ServerTester.testAll(
             context: appCtx,
             servers: testable,
-            concurrency: 16,   // в (ТЗ Elyor): «пинг всех» быстрее — больше параллелизма (пинг дёшев)
+            concurrency: PING_CONCURRENCY,   // в (ТЗ Elyor): «пинг всех» быстрее — больше параллелизма (пинг дёшев)
             onResult: (p, ms) =>
             {
                 var v = (int)ms;
                 pingByKey[key(p)] = v;
                 onPingResult(p, v);
+                if (v >= 0 && !ServerFilter.isPaused(p, blocklist) && ServerFilter.protocolAllowed(p, raceSettings)) race?.offer(p);
             },
             onProgress: (done, total) =>
             {
@@ -321,6 +338,7 @@ public static class FullTestRunner
             {
                 if (Volatile.Read(ref cancelled))
                 {
+                    race?.cancel();
                     finishOnce(new Result(null, null, 0.0, 0, true));
                 }
                 else
@@ -333,13 +351,28 @@ public static class FullTestRunner
                         .DistinctBy(key)
                         .OrderBy(it => pingByKey.TryGetValue(key(it), out var pv) ? pv : it.pingMs ?? int.MaxValue)
                         .ToList();
-                    startSpeedPhase(alive);
+                    if (race == null) { startSpeedPhase(alive); return; }
+                    KThread.start(() =>
+                    {
+                        race.complete();
+                        race.join(RACE_WAIT);
+                        race.cancel();
+                        // Подключение асинхронно: без ожидания Этап 2 не увидел бы активного и переключился бы зря.
+                        if (race.winner is { } won)
+                        {
+                            var end = JavaSystem.currentTimeMillis() + RACE_CONNECT_WAIT_MS;
+                            while (ProxyState.state.value.serverKey != key(won) && JavaSystem.currentTimeMillis() < end && !Volatile.Read(ref cancelled))
+                                Thread.Sleep(200);
+                        }
+                        startSpeedPhase(alive);
+                    }, "fulltest-race-wait");
                 }
             });
 
         return new HandleImpl(() =>
         {
             Volatile.Write(ref cancelled, true);
+            race?.cancel();
             pingHandle?.cancel();
             // Промпт 123.D: флаг cancelled проверяется лишь МЕЖДУ замерами — идущий замер скорости
             // (measureSpeed активного/кандидата, приоритетный замер) висел бы до своего таймаута.

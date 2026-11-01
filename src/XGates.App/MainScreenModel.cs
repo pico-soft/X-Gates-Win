@@ -141,6 +141,9 @@ public sealed class MainScreenModel : IDisposable
     private bool remeasuring;
     private long testStartedMs;   // начало идущего полного теста: граница «Живых», пока он идёт
     private long liveFloorMs;     // то же для завершённого теста, см. LiveListPrefs
+    private FirstAliveRace? quickRace;
+    private const int QUICK_CANDIDATES = 24;
+    private const int AUTO_START_CONFIRM_MS = 6_000;
 
     public MainScreenModel(Context context, IUiThread ui)
     {
@@ -299,8 +302,38 @@ public sealed class MainScreenModel : IDisposable
         MonitorCoordinator.wake();   // действие пользователя сбрасывает паузу монитора / прерывает перебор
     }
 
+    /**
+     * «Сначала связь» (ТЗ Elyor 2026-11-01): пока обновляются подписки, туннеля не было бы вовсе. Известные серверы —
+     * последний, затем лучшие по прошлым замерам — проверяются сразу, первый живой становится активным.
+     */
+    private void connectFirstAlive(string cause)
+    {
+        if (!FirstAliveRace.tunnelNeeded()) return;
+        var settings = SettingsStore.current();
+        var bl = BlocklistStore.current();
+        var curKey = ProxyState.state.value.serverKey;
+        var lastKey = LastServerStore.load(context);
+        var known = servers
+            .Where(it => SubscriptionManager.serverKey(it) != curKey && (effPing(it) ?? 0) >= 0 &&
+                         !ServerFilter.isBlocked(it, bl) && !ServerFilter.isPaused(it, bl) && ServerFilter.protocolAllowed(it, settings))
+            .DistinctBy(SubscriptionManager.serverKey)
+            .OrderByDescending(it => SubscriptionManager.serverKey(it) == lastKey)
+            .ThenByDescending(it => effSpeed(it) ?? 0.0)
+            .ThenBy(it => effPing(it) ?? int.MaxValue)
+            .Take(QUICK_CANDIDATES).ToList();
+        if (known.Count == 0) return;
+        quickRace?.cancel();
+        var race = quickRace = new FirstAliveRace(context, p => ui(() =>
+        {
+            if (FirstAliveRace.tunnelNeeded()) connectServerNow(p, cause);
+        }));
+        foreach (var p in known) race.offer(p);
+        race.complete();
+    }
+
     public void onStop() => ui(() =>
     {
+        quickRace?.cancel();
         var proxy = ProxyState.state.value;
         if (proxy.running)
             MonitorLog.@event(context, "switch", "Прокси остановлен", $"ручная остановка — {ServerLabels.displayForKey(context, proxy.serverKey) ?? proxy.label ?? "—"}");
@@ -366,6 +399,7 @@ public sealed class MainScreenModel : IDisposable
         if (serverList != null) all = serverList;
         else { servers = SubscriptionManager.allServers(context); all = servers; }
         if (all.Count == 0) { subStatus = "нет серверов"; return; }
+        quickRace?.cancel();   // у теста своя гонка: две подключали бы друг друга по очереди
         fullTesting = true;
         testStartedMs = minuteFloor(JavaSystem.currentTimeMillis());
         MonitorCoordinator.fullTestRunning = true;   // монитор молчит, пока идёт ручной тест
@@ -433,7 +467,8 @@ public sealed class MainScreenModel : IDisposable
         if (fullTesting || refreshingSubs) return;
         if (checking) { checkCancel = true; ServerSpeedTester.abortCurrentMeasure(); checking = false; MonitorCoordinator.fullTestRunning = false; checkStatus = ""; }
         var hasUrl = sources.Any(it => it.enabled && it.url.IsNotBlank());
-        if (hasUrl) onRefreshAllNow(onComplete: () => onFullTestNow(null)); else onFullTestNow(null);
+        if (hasUrl) { connectFirstAlive("самый быстрый: первый живой"); onRefreshAllNow(onComplete: () => onFullTestNow(null)); }
+        else onFullTestNow(null);
     }
 
     /// <summary>Кнопка «Прервать»: на обновлении подписок — флаг, на тесте — отмена теста.</summary>
@@ -610,7 +645,14 @@ public sealed class MainScreenModel : IDisposable
             var bl = BlocklistStore.current();
             if (last != null && !ServerFilter.isBlocked(last, bl) && !ServerFilter.isPaused(last, bl))
                 connectServerNow(last, "автозапуск (последний сервер)");
+            else connectFirstAlive("автозапуск: первый живой");
         }
+        // Последний сервер мог умереть: не ждём, пока обновятся подписки и дойдёт полный тест.
+        KThread.start(() =>
+        {
+            Thread.Sleep(AUTO_START_CONFIRM_MS);
+            ui(() => { if (!fullTesting) connectFirstAlive("автозапуск: первый живой"); });
+        }, "auto-start-confirm");
         KThread.start(() =>
         {
             var justSeeded = SubscriptionManager.trySeedDefaultSource(context);

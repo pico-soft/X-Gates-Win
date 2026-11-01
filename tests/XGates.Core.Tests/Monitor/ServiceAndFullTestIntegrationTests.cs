@@ -87,6 +87,39 @@ public sealed class ServiceAndFullTestIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void Without_tunnel_first_alive_connects_before_ping_of_all_servers_finishes()
+    {
+        // Пинг идёт параллельно, а адреса-«чёрные дыры» держали бы его до таймаута 5 с на каждый.
+        int a = net.StartVlessServer();
+        var holes = Enumerable.Range(1, 96).Select(i => $"vless://{LocalTestNet.Uuid}@10.255.255.{i}:443?type=tcp&security=none#hole{i}");
+        var body = string.Join("\n", holes.Prepend($"vless://{LocalTestNet.Uuid}@127.0.0.1:{a}?type=tcp&security=none#good"));
+        SubscriptionManager.init(ctx);
+        var (_, r) = SubscriptionManager.addLocalFromBody(ctx, body, "local");
+        Assert.True(r.ok, r.error);
+
+        var pingDone = 0;
+        var connectedDuringPing = -1;
+        using var fin = new ManualResetEventSlim();
+        using var conn = new ManualResetEventSlim();
+        var h = FullTestRunner.run(ctx, SubscriptionManager.allServers(ctx),
+            onPhase: _ => { },
+            connect: p =>
+            {
+                Volatile.Write(ref connectedDuringPing, Volatile.Read(ref pingDone));
+                conn.Set();
+                XrayProxyService.start(ctx, XrayConfigBuilder.build(p), ServerLabels.full(p), SubscriptionManager.serverKey(p));
+            },
+            onDone: _ => fin.Set(),
+            onPingResult: (_, _) => Interlocked.Increment(ref pingDone));
+        Assert.True(conn.Wait(15_000), "первый живой не подключился за 15 с");
+        Assert.True(Volatile.Read(ref connectedDuringPing) < 97, $"подключение после конца пинга: {connectedDuringPing}");
+        h.cancel();
+        fin.Wait(30_000);
+        XrayProxyService.stop(ctx);
+        Assert.True(WaitUntil(() => !PortOpen(10815), 10_000));
+    }
+
+    [Fact]
     public void FullTest_connects_alive_and_skips_dead()
     {
         int a = net.StartVlessServer(), b = net.StartVlessServer(), dead = LocalTestNet.FreePort();
