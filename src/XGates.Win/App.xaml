@@ -1,9 +1,32 @@
-﻿<Application x:Class="XGates.Win.App"
+<Application x:Class="XGates.Win.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:local="clr-namespace:XGates.Win"
-             StartupUri="MainWindow.xaml">
+             ShutdownMode="OnExplicitShutdown">
+    <!-- Окно не задаём (StartupUri): приложение живёт в трее, окно открывается по необходимости (App.xaml.cs). -->
     <Application.Resources>
-         
+        <SolidColorBrush x:Key="Gray" Color="#9E9E9E" />
+        <SolidColorBrush x:Key="LiveBg" Color="#EEF7EE" />
+        <SolidColorBrush x:Key="PrevBg" Color="#EEF2F9" />
+        <SolidColorBrush x:Key="AllBg" Color="#F1F4F6" />
+        <SolidColorBrush x:Key="Accent" Color="#1565C0" />
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="12,5" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+        <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Padding" Value="18,8" />
+        </Style>
+        <Style x:Key="Link" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource Gray}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Margin" Value="0,2" />
+        </Style>
+        <Style x:Key="Section" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Margin" Value="0,14,0,6" />
+        </Style>
     </Application.Resources>
 </Application>
