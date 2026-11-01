@@ -366,23 +366,23 @@ public sealed class MainScreenModel : IDisposable
     {
         if (refreshingSubs) return;
         var hasUrl = sources.Any(it => it.enabled && it.url.IsNotBlank());
-        if (!hasUrl) { subStatus = "нет включённых подписок с URL"; return; }
+        if (!hasUrl) { subStatus = "Нет включённых подписок для обновления"; return; }
         refreshingSubs = true; subRefreshCancel = false;
         CrashContext.set("обновление всех источников");
-        TestProgress.startIndeterminate("обновление подписок…");
+        TestProgress.startIndeterminate("Обновляю подписки…");
         KThread.start(() =>
         {
             var res = SubscriptionManager.refreshAllEnabled(context, cancelled: () => subRefreshCancel,
                 onEach: (src, sum) => ui(() =>
                 {
-                    TestProgress.phase($"{src.name}: " + (sum.ok ? $"+{sum.added}" : "ошибка"));
+                    TestProgress.phase($"{src.name}: " + (sum.ok ? "обновлена" : "не удалось обновить"));
                     reloadSources();
                 }));
             var okN = res.Values.Count(it => it.ok); var failN = res.Values.Count(it => !it.ok);
             ui(() =>
             {
                 refreshingSubs = false;
-                TestProgress.finish(subRefreshCancel ? "обновление прервано" : $"подписки обновлены: {okN} ок, {failN} ошибок");
+                TestProgress.finish(subRefreshCancel ? "Обновление прервано" : SubscriptionsModel.refreshedText(okN, failN));
                 reloadSources(); reloadServers();
                 if (!subRefreshCancel) onComplete?.Invoke();   // цепочка автозапуска: тест по свежему списку
             });

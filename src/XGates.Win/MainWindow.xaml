@@ -182,11 +182,9 @@
                                         <CheckBox Grid.Column="0" IsChecked="{Binding Enabled, Mode=OneWay}" Click="OnSourceToggle" Tag="{Binding}"
                                                   VerticalAlignment="Top" Margin="0,2,10,0" ToolTip="Включить / выключить источник" />
                                         <StackPanel Grid.Column="1">
-                                            <TextBlock Text="{Binding Name}" FontWeight="Bold" TextWrapping="Wrap" />
-                                            <TextBlock Text="{Binding Url}" Foreground="{StaticResource Gray}" FontSize="11" TextWrapping="Wrap" />
-                                            <TextBlock Text="{Binding CountLine}" FontSize="12" />
-                                            <TextBlock Text="{Binding TimesLine}" Foreground="{StaticResource Gray}" FontSize="11" TextWrapping="Wrap" />
-                                            <TextBlock Text="{Binding Error}" Foreground="#C62828" FontSize="12" TextWrapping="Wrap" Visibility="{Binding ErrorVisibility}" />
+                                            <TextBlock Text="{Binding Name}" ToolTip="{Binding Url}" FontWeight="Bold" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding Summary}" FontSize="12" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding Problem}" ToolTip="{Binding ProblemTip}" Foreground="#C62828" FontSize="12" TextWrapping="Wrap" Visibility="{Binding ProblemVisibility}" />
                                         </StackPanel>
                                         <StackPanel Grid.Column="2" VerticalAlignment="Top">
                                             <Button Content="Имя…" Click="OnSourceRename" Tag="{Binding}" Padding="8,2" Margin="0,0,0,4" />
@@ -197,11 +195,13 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <TextBlock x:Name="NoSources" Text="Нет источников." Foreground="{StaticResource Gray}" Visibility="Collapsed" />
+                    <TextBlock x:Name="NoSources" Text="Подписок пока нет." Foreground="{StaticResource Gray}" Visibility="Collapsed" />
 
-                    <TextBlock Style="{StaticResource Section}" Text="Добавить подписку (URL)" />
+                    <TextBlock Style="{StaticResource Section}" Text="Добавить подписку" />
+                    <TextBlock Text="Адрес подписки" Foreground="{StaticResource Gray}" />
                     <TextBox x:Name="NewUrl" Margin="0,0,0,6" ToolTip="https://…" />
-                    <TextBox x:Name="NewName" Margin="0,0,0,6" ToolTip="Название (необязательно)" />
+                    <TextBlock Text="Название (можно не заполнять)" Foreground="{StaticResource Gray}" />
+                    <TextBox x:Name="NewName" Margin="0,0,0,6" />
                     <Button Content="Добавить и обновить" Click="OnAddUrl" HorizontalAlignment="Left" />
 
                     <TextBlock Style="{StaticResource Section}" Text="Вставить ссылки текстом" />

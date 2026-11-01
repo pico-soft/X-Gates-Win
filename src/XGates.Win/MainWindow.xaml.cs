@@ -175,8 +175,8 @@ public partial class MainWindow : Window
         StatusLine.Visibility = V(StatusLine.Text.Length > 0);
         StatusBlocked.Visibility = V(st.running && st.blocked);
         StatusHidden.Visibility = V(st.running && st.hidden);
-        var pingSuffix = st.pingMs is int pm ? pm < 0 ? " · пинг ✗" : $" · пинг {pm} мс" + (st.pingAge.Length > 0 ? $" ({st.pingAge})" : "") : "";
-        StatusSubtitle.Text = st.running && st.subtitle != null ? st.subtitle + pingSuffix : "";
+        StatusSubtitle.Text = !st.running || st.pingMs is not int pm ? "" :
+            pm < 0 ? "Сервер не отвечает на проверку" : $"Отклик {pm} мс" + (st.pingAge.Length > 0 ? $" ({st.pingAge})" : "");
         StatusSubtitle.Visibility = V(StatusSubtitle.Text.Length > 0);
         StatusIp.Text = st.running ? "IP: " + (st.ipText.Length == 0 ? "…" : st.ipText) : "";
         StatusIp.Visibility = V(st.running);
@@ -254,7 +254,7 @@ public partial class MainWindow : Window
         public Brush TitleBrush => r.paused ? Gray : Brushes.Black;
         public string Caption => r.caption;
         public Visibility CaptionVisibility => V(r.caption.Length > 0);
-        public string PingText => r.pingMs is int p ? p < 0 ? "пинг ✗" : $"пинг {p} мс" : "";
+        public string PingText => r.pingMs is int p ? p < 0 ? "не отвечает" : $"отклик {p} мс" : "";
         public Visibility PingVisibility => V(!r.paused && r.pingMs != null);
         public string PingAge => r.pingAge;
         public Visibility PingAgeVisibility => V(!r.paused && r.pingMs != null && r.pingAge.Length > 0);
@@ -333,11 +333,12 @@ public partial class MainWindow : Window
         public SubSource Source => s;
         public bool Enabled => s.enabled;
         public string Name => s.name;
+        private SourceCard card => SubscriptionsModel.card(s, DateTime.Now);
         public string Url => s.url;
-        public string CountLine => $"{s.serverCount} серв" + (string.IsNullOrWhiteSpace(s.url) ? " · локальная" : "");
-        public string TimesLine => $"удача: {s.lastOkTs ?? "—"} · попытка: {s.lastRefreshTs ?? "не обновлялась"}";
-        public string Error => s.lastError ?? "";
-        public Visibility ErrorVisibility => V(!string.IsNullOrWhiteSpace(s.lastError));
+        public string Summary => $"{card.servers} · {card.updated}";
+        public string Problem => card.problem;
+        public string ProblemTip => s.lastError ?? "";
+        public Visibility ProblemVisibility => V(card.problem.Length > 0);
     }
 
     private void renderSubs()
@@ -564,8 +565,8 @@ public partial class MainWindow : Window
     }
 
     private void OnClearJournal(object sender, RoutedEventArgs e) { MonitorLog.clear(ctx); renderStats(); }
-    private void OnResetTrafficSession(object sender, RoutedEventArgs e) { TrafficTracker.resetSession(); renderStats(); }
     private void OnCopyJournal(object sender, RoutedEventArgs e) => copyAndConfirm(sender, StatsModel.journalText(JavaSystem.currentTimeMillis()));
+    private void OnResetTrafficSession(object sender, RoutedEventArgs e) { TrafficTracker.resetSession(); renderStats(); }
     private void OnResetTrafficToday(object sender, RoutedEventArgs e)
     {
         if (MessageBox.Show(this, StatsModel.resetTodayText(TrafficTracker.state.value), "Сбросить за сутки?", MessageBoxButton.OKCancel) == MessageBoxResult.OK)

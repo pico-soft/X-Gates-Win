@@ -46,25 +46,25 @@ public sealed class SubscriptionsAndBootstrapTests : IDisposable
         m.registryChanged += () => Interlocked.Increment(ref registryChanges);
 
         m.onAddPaste("  ");
-        Assert.True(WaitUntil(() => Snap(m).status == "вставьте ссылки", 5_000));
+        Assert.True(WaitUntil(() => Snap(m).status == "Вставьте ссылки", 5_000));
 
         m.onAddPaste($"vless://{LocalTestNet.Uuid}@127.0.0.1:1001?type=tcp#a\nvless://{LocalTestNet.Uuid}@127.0.0.1:1002?type=tcp#b\nfoo://bar");
-        Assert.True(WaitUntil(() => Snap(m).status.StartsWith("вставка: +2"), 10_000), Snap(m).status);
+        Assert.True(WaitUntil(() => Snap(m).status == "Добавлено серверов: 2, не удалось распознать: 1", 10_000), Snap(m).status);
         Assert.True(registryChanges > 0);
 
         // URL: добавляется и сразу обновляется (локальный «сервер подписок»).
         net.SubBody = $"vless://{LocalTestNet.Uuid}@127.0.0.1:1003?type=tcp#c\n";
         var url = $"http://127.0.0.1:{net.HttpPort}/sub";
         m.onAddUrl(url, "Моя");
-        Assert.True(WaitUntil(() => Snap(m).status.StartsWith("добавлено: +1"), 20_000), Snap(m).status);
+        Assert.True(WaitUntil(() => Snap(m).status == "Подписка добавлена: 1 сервер", 20_000), Snap(m).status);
         m.onAddUrl(url, "Моя ещё раз");
-        Assert.True(WaitUntil(() => Snap(m).status == "дубликат URL или пусто", 10_000), Snap(m).status);
+        Assert.True(WaitUntil(() => Snap(m).status == "Такая подписка уже есть", 10_000), Snap(m).status);
 
         // Файл.
         var f = Path.Combine(ctx.filesDir, "list.txt");
         File.WriteAllText(f, $"vless://{LocalTestNet.Uuid}@127.0.0.1:1004?type=tcp#d\n");
         m.onImportFile(f);
-        Assert.True(WaitUntil(() => Snap(m).status.StartsWith("из файла: +1"), 10_000), Snap(m).status);
+        Assert.True(WaitUntil(() => Snap(m).status == "Добавлено серверов: 1", 10_000), Snap(m).status);
         Assert.Contains(Snap(m).sources, s => s.name == "list.txt");
 
         var sub = Snap(m).sources.Single(s => s.url == url);
@@ -85,7 +85,29 @@ public sealed class SubscriptionsAndBootstrapTests : IDisposable
         Assert.Equal(3, SubscriptionManager.allServers(ctx).Count);
 
         m.onRefreshAll();   // подписок с URL не осталось
-        Assert.True(WaitUntil(() => Snap(m).status == "нет включённых подписок с URL", 5_000), Snap(m).status);
+        Assert.True(WaitUntil(() => Snap(m).status == "Нет включённых подписок для обновления", 5_000), Snap(m).status);
+    }
+
+    [Fact]
+    public void Source_card_speaks_plain_language()
+    {
+        var now = new DateTime(2026, 11, 1, 15, 0, 0, DateTimeKind.Local);
+        var ok = new SubSource { id = "a", name = "A", url = "https://x/sub", lastOkTs = "2026-11-01 12:30", serverCount = 21 };
+        Assert.Equal(new SourceCard("21 сервер", "Обновлена сегодня в 12:30", ""), SubscriptionsModel.card(ok, now));
+        Assert.Equal("Обновлена вчера в 12:30", SubscriptionsModel.card(ok with { lastOkTs = "2026-10-31 12:30" }, now).updated);
+        Assert.Equal("Обновлена 29.10 в 12:30", SubscriptionsModel.card(ok with { lastOkTs = "2026-10-29 12:30" }, now).updated);
+
+        // Технический текст ошибки в карточку не попадает.
+        var broken = ok with { lastError = "HttpRequestException: 502 via socks · host=x" };
+        Assert.Equal("Не удалось обновить. Прежний список серверов работает.", SubscriptionsModel.card(broken, now).problem);
+        Assert.StartsWith("Не удалось загрузить", SubscriptionsModel.card(broken with { serverCount = 0 }, now).problem);
+
+        Assert.Equal("Добавлена вручную", SubscriptionsModel.card(new SubSource { id = "a", name = "A", url = "" }, now).updated);
+        Assert.Equal("Ещё не обновлялась", SubscriptionsModel.card(new SubSource { id = "a", name = "A", url = "https://x/sub" }, now).updated);
+        Assert.Equal("2 сервера", SubscriptionsModel.serversText(2));
+        Assert.Equal("5 серверов", SubscriptionsModel.serversText(5));
+        Assert.Equal("11 серверов", SubscriptionsModel.serversText(11));
+        Assert.Equal("112 серверов", SubscriptionsModel.serversText(112));
     }
 
     [Fact]
