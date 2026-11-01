@@ -48,6 +48,32 @@ jobs:
           XGATES_FIREFOX_OUT: ${{ github.workspace }}\out\firefox
         run: dotnet test tests/XGates.Core.Tests -c Release --filter "FullyQualifiedName~FirefoxRealBrowserTests" --logger "console;verbosity=normal"
 
+      - name: Script that sends logs from the test laptop
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $script = 'tools\windows\send-logs.ps1'
+          powershell -ExecutionPolicy Bypass -File $script
+          if ($LASTEXITCODE -ne 0) { throw 'first run failed' }
+          $exe = Join-Path $env:LOCALAPPDATA 'X-Gates-LogSync\syncthing.exe'
+          $stHome = Join-Path $env:LOCALAPPDATA 'X-Gates-LogSync\home'
+          $other = Join-Path $env:TEMP 'st-other'
+          & $exe generate "--home=$other" *> $null
+          $id = & $exe device-id "--home=$other"
+          powershell -ExecutionPolicy Bypass -File $script -ServerId $id -ServerAddress 'tcp://192.0.2.1:22000'
+          if ($LASTEXITCODE -ne 0) { throw 'pairing run failed' }
+          powershell -ExecutionPolicy Bypass -File $script -ServerId $id -ServerAddress 'tcp://192.0.2.1:22000'
+          if ($LASTEXITCODE -ne 0) { throw 'second pairing run failed' }
+          $folder = (& $exe cli "--home=$stHome" config folders xgates-win-logs dump-json | Out-String) | ConvertFrom-Json
+          if ($folder.type -ne 'sendonly') { throw "folder type $($folder.type)" }
+          if (@($folder.devices | Where-Object { $_.deviceID -eq $id }).Count -ne 1) { throw 'server is not in the folder' }
+          $device = (& $exe cli "--home=$stHome" config devices $id dump-json | Out-String) | ConvertFrom-Json
+          if ($device.addresses -notcontains 'tcp://192.0.2.1:22000') { throw 'address was not saved' }
+          powershell -ExecutionPolicy Bypass -File $script -Stop
+          Start-Sleep -Seconds 2
+          if (Get-Process syncthing -ErrorAction SilentlyContinue) { throw 'syncthing is still running' }
+
       - name: Сборка приложения (self-contained win-x64)
         if: always()
         run: dotnet publish src/XGates.Win -c Release -r win-x64 --self-contained -o out/publish/XGatesWin
