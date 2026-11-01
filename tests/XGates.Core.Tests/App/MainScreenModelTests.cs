@@ -111,6 +111,52 @@ public sealed class MainScreenModelTests : IDisposable
     }
 
     [Fact]
+    public void Live_list_shows_only_what_the_test_found_and_stale_ones_move_to_previous()
+    {
+        int a = net.StartVlessServer(), b = net.StartVlessServer();
+        Import(a, b);
+        // srv1 живой, в реестре свежий замер, но этот тест его не проверяет: в «Живых» ему не место.
+        var servers = SubscriptionManager.allServers(ctx);
+        var tested = servers.First(it => it.remarks == "srv0");
+        var skipped = SubscriptionManager.serverKey(servers.First(it => it.remarks == "srv1"));
+        SubscriptionManager.applyPingResults(ctx, new Dictionary<string, int> { [skipped] = 50 });
+        SubscriptionManager.applySpeedResults(ctx, new Dictionary<string, double> { [skipped] = 99.0 });
+        model!.reloadAll();
+        Assert.True(WaitUntil(() => Snap().alive.Any(r => r.key == skipped), 5_000), "до теста запись из реестра в «Живых»");
+
+        // Метки в реестре с точностью до минуты: тест должен начаться в следующей.
+        Thread.Sleep(TimeSpan.FromSeconds(61 - DateTime.Now.Second));
+        model!.onFullTest([tested]);
+        Assert.True(WaitUntil(() => Snap().fullTesting, 5_000), "тест не стартовал");
+        Assert.DoesNotContain(Snap().alive, r => r.key == skipped);
+        Assert.True(WaitTestDone(), "тест не завершился: " + TestProgress.state.value.phase);
+        Assert.True(WaitUntil(() => ProxyState.state.value.running, 10_000), ProxyState.state.value.message);
+
+        var after = Snap();
+        Assert.Contains(after.alive, r => r.name == "srv0");
+        Assert.DoesNotContain(after.alive, r => r.key == skipped);
+        Assert.Contains(after.prevMeasured, r => r.key == skipped);
+    }
+
+    [Fact]
+    public void After_test_monitor_data_is_not_shadowed_by_session_results()
+    {
+        int a = net.StartVlessServer(), b = net.StartVlessServer();
+        Import(a, b);
+        model!.onFastest();
+        Assert.True(WaitUntil(() => Snap().fullTesting, 5_000), "тест не стартовал");
+        Assert.True(WaitTestDone(), "тест не завершился: " + TestProgress.state.value.phase);
+        Assert.True(WaitUntil(() => ProxyState.state.value.running, 10_000), ProxyState.state.value.message);
+
+        // Монитор записал в реестр: второй сервер перестал отвечать.
+        var other = SubscriptionManager.allServers(ctx).First(it => SubscriptionManager.serverKey(it) != ProxyState.state.value.serverKey);
+        SubscriptionManager.applyPingResults(ctx, new Dictionary<string, int> { [SubscriptionManager.serverKey(other)] = -1 });
+        model!.reloadAll();
+        Assert.True(WaitUntil(() => Snap().alive.All(r => r.key != SubscriptionManager.serverKey(other)), 5_000),
+            "сессионный пинг теста перекрыл свежий из реестра");
+    }
+
+    [Fact]
     public void Check_without_proxy_says_so_and_with_proxy_confirms_connection()
     {
         Import(net.StartVlessServer());

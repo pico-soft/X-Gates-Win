@@ -139,6 +139,8 @@ public sealed class MainScreenModel : IDisposable
     private CancellationTokenSource? ipDelay;
     private string remeasureStatus = "";
     private bool remeasuring;
+    private long testStartedMs;   // начало идущего полного теста: граница «Живых», пока он идёт
+    private long liveFloorMs;     // то же для завершённого теста, см. LiveListPrefs
 
     public MainScreenModel(Context context, IUiThread ui)
     {
@@ -146,6 +148,7 @@ public sealed class MainScreenModel : IDisposable
         uiThread = ui;
         servers = SubscriptionManager.allServers(context);
         sources = SubscriptionManager.sources(context);
+        liveFloorMs = LiveListPrefs.floorMs(context);
         showCrashBanner = CrashReporter.hasUnseen();
         var p = ProxyState.state.value;
         lastRunning = p.running; lastServerKey = p.serverKey;
@@ -230,6 +233,16 @@ public sealed class MainScreenModel : IDisposable
     });
 
     public void reloadServers() { servers = SubscriptionManager.allServers(context); CrashContext.registrySize = servers.Count; }
+
+    /// <summary>
+    /// Числа записаны в реестр, сессионные больше не нужны. Оставшись, они перекрывали бы свежие данные монитора до
+    /// следующего теста: на Android их сбрасывал уход с экрана, здесь модель живёт, пока работает программа.
+    /// </summary>
+    private void clearSessionResults()
+    {
+        if (fullTesting) return;
+        pingResults = new(); pingResultsAt = new(); speedResults = new(); speedResultsFull = new(); speedResultsAt = new();
+    }
     public void reloadSources() => sources = SubscriptionManager.sources(context);
 
     /// <summary>Перечитать реестр и источники (после правок на вкладке «Подписки»).</summary>
@@ -259,6 +272,12 @@ public sealed class MainScreenModel : IDisposable
     }
     // Как в ServerRow Kotlin: давность скорости — из СОХРАНЁННОЙ метки (speedTestedTs), не сессионной.
     private static string speedAge(ServerProfile p) => speedAgeText(p.speedTestedTs);
+    // Пока идёт тест, в реестре ещё старая метка: новый замер показывал бы давность прошлого.
+    private string effSpeedAge(ServerProfile p) =>
+        speedResultsAt.TryGetValue(SubscriptionManager.serverKey(p), out var at) ? speedAgeTextMs(at) : speedAge(p);
+
+    // Метки в реестре с точностью до минуты: граница «Живых» не должна быть точнее, иначе свежий замер окажется старше неё.
+    private static long minuteFloor(long ms) => ms - ms % 60_000L;
 
     // ── действия ──
     private void startServer(ServerProfile p)
@@ -348,6 +367,7 @@ public sealed class MainScreenModel : IDisposable
         else { servers = SubscriptionManager.allServers(context); all = servers; }
         if (all.Count == 0) { subStatus = "нет серверов"; return; }
         fullTesting = true;
+        testStartedMs = minuteFloor(JavaSystem.currentTimeMillis());
         MonitorCoordinator.fullTestRunning = true;   // монитор молчит, пока идёт ручной тест
         // (Android: CPU-wakelock на время теста — на Windows не нужен, процесс не замораживают.)
         MonitorCoordinator.fullTestCancel = () => fullHandle?.cancel();
@@ -391,6 +411,8 @@ public sealed class MainScreenModel : IDisposable
                         MonitorCoordinator.fullTestCancel = null; CrashContext.set("простой");
                         TestProgress.finish(r.cancelled ? "Отменено" : r.connected != null ? "Готово" : "Готово · рабочих серверов не нашлось");
                         reloadServers();
+                        clearSessionResults();
+                        if (!r.cancelled) { liveFloorMs = testStartedMs; LiveListPrefs.setFloorMs(context, liveFloorMs); }
                         // Активный — реальную скорость на плашку СРАЗУ (не ждём цикл монитора).
                         if (!r.cancelled && r.connected != null)
                             KThread.start(() =>
@@ -431,7 +453,7 @@ public sealed class MainScreenModel : IDisposable
             ServerSpeedTester.resetMeasureAbort();    // Пр.123.D: вернуть замеры — иначе монитор остаётся «нем»
             SubscriptionManager.applyPingResults(context, pSnap);
             SubscriptionManager.applySpeedResults(context, sSnap);
-            ui(reloadServers);
+            ui(() => { reloadServers(); clearSessionResults(); });
         }, "cancel-full");
     }
 
@@ -508,7 +530,7 @@ public sealed class MainScreenModel : IDisposable
             {
                 ui(() =>
                 {
-                    checking = false; MonitorCoordinator.fullTestRunning = false; reloadServers();
+                    checking = false; MonitorCoordinator.fullTestRunning = false; reloadServers(); clearSessionResults();
                     if (iterate && !checkCancel)
                     {
                         var bl = BlocklistStore.current();
@@ -685,6 +707,7 @@ public sealed class MainScreenModel : IDisposable
                 remeasureStatus = m.ok ? $"результат: {JavaNumbers.JavaDoubleToString(m.mbps)} Мбит/с" : $"НЕ ИЗМЕРЕНО — {m.reason}";
                 remeasuring = false;
                 reloadServers();
+                clearSessionResults();
             });
         }, "remeasure");
     });
@@ -741,7 +764,9 @@ public sealed class MainScreenModel : IDisposable
         var activeServer = servers.FirstOrDefault(it => proxy.running && proxy.serverKey != null && SubscriptionManager.serverKey(it) == proxy.serverKey);
         var discriminators = buildDiscriminators(servers, blocklist);
 
-        ServerFilter.Tier tierOf(ServerProfile p) => ServerFilter.tier(p, effPing(p, proxy, tunnelSpeed), effSpeed(p), effSpeedAt(p), nowMs, settings, blocklist);
+        // ТЗ Elyor 2026-11-01: «Живые» — только найденное последним тестом; пока он идёт, список растёт по мере находок.
+        var freshFloor = fullTesting ? testStartedMs : liveFloorMs;
+        ServerFilter.Tier tierOf(ServerProfile p) => ServerFilter.tier(p, effPing(p, proxy, tunnelSpeed), effSpeed(p), effSpeedAt(p), nowMs, settings, blocklist, freshFloor);
         var activeProven = proxy.running && health.lastOkMs > 0 && health.serverKey == proxy.serverKey &&
             health.phase != TunnelHealth.Phase.RECOVERING && health.phase != TunnelHealth.Phase.NO_SERVERS;
         bool isProvenActive(ServerProfile p) => activeProven && proxy.serverKey == SubscriptionManager.serverKey(p);
@@ -752,7 +777,7 @@ public sealed class MainScreenModel : IDisposable
         {
             var k = SubscriptionManager.serverKey(p);
             return new ServerRowInfo(p, k, displayName(p, blocklist), canBeActive && proxy.running && proxy.serverKey == k, number,
-                effSpeed(p), effSpeedFull(p), speedAge(p), effPing(p, proxy, tunnelSpeed), effPingAge(p),
+                effSpeed(p), effSpeedFull(p), effSpeedAge(p), effPing(p, proxy, tunnelSpeed), effPingAge(p),
                 discriminators.TryGetValue(k, out var c) ? c : "", ServerFilter.isPaused(p, blocklist));
         }
 

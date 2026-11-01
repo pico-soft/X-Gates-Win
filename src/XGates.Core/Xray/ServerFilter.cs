@@ -76,12 +76,13 @@ public static class ServerFilter
      *             («при последнем замере не показали пинг / показали пинг, но не отдали скорость» — Elyor).
      * [speedFreshAtMs] — момент последнего замера в мс (сессионный или из persisted-метки); null → трактуем как старый.
      * АКТИВНЫЙ подключённый сервер — исключение (его живость доказана туннелем), добавляется в «Живые» вызывающим.
+     * [freshFloorMs] — замер старше этой границы в «Живые» не идёт, даже если укладывается в окно свежести.
      */
-    public static Tier tier(ServerProfile p, int? pingMs, double? speedMbps, long? speedFreshAtMs, long nowMs, AppSettings s, Blocklist b)
+    public static Tier tier(ServerProfile p, int? pingMs, double? speedMbps, long? speedFreshAtMs, long nowMs, AppSettings s, Blocklist b, long freshFloorMs = 0L)
     {
         if (isBlocked(p, b) || isPaused(p, b) || !protocolAllowed(p, s)) return Tier.NONE;
         if (pingMs == null || pingMs < 0) return Tier.NONE;                 // нет пинга → только «Все»
         if ((speedMbps ?? 0.0) <= 0.0) return Tier.NONE;                    // пинг-без-скорости → только «Все»
-        return isSpeedFresh(speedFreshAtMs, nowMs, s.liveFreshSec) ? Tier.LIVE : Tier.PREVIOUS;
+        return isSpeedFresh(speedFreshAtMs, nowMs, s.liveFreshSec) && speedFreshAtMs >= freshFloorMs ? Tier.LIVE : Tier.PREVIOUS;
     }
 }

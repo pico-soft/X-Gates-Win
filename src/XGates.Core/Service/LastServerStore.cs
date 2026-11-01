@@ -40,6 +40,21 @@ public static class LastServerStore
  *  • [offerDismissed] — человек закрыл полосу → больше не предлагаем.
  * Порт 1:1 с service/BootPrefs.kt.
  */
+/// <summary>
+/// Граница «Живых»: начало последнего завершённого полного теста. Измеренное раньше неё идёт в «Ранее измеренные»
+/// (ТЗ Elyor 2026-11-01: в «Живых» только то, что тест нашёл). Переживает перезапуск программы.
+/// </summary>
+public static class LiveListPrefs
+{
+    private const string PREFS = "live_list";
+    private const string KEY_FLOOR = "floorMs";
+
+    private static SharedPreferences p(Context c) => SharedPreferences.get(c.applicationContext, PREFS);
+
+    public static long floorMs(Context c) => p(c).getLong(KEY_FLOOR, 0L);
+    public static void setFloorMs(Context c, long ms) => p(c).edit().putLong(KEY_FLOOR, ms).apply();
+}
+
 public static class BootPrefs
 {
     private const string PREFS = "boot_offer";
