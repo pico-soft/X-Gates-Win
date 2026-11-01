@@ -922,6 +922,9 @@ public static class NetworkMonitor
     /// <summary>Короткий замер для решений «держать лучший» (подменяется в тестах: настоящий на стенде шумит).</summary>
     internal static Func<Context, ServerProfile, double, double> measureEnough = ServerSpeedTester.measureSufficiency;
 
+    /// <summary>Полный замер кандидата (подменяется в тестах, как [measureEnough]).</summary>
+    internal static Func<Context, ServerProfile, double> measureCandidate = (c, p) => ServerSpeedTester.measureSpeed(c, p);
+
     /// <summary>Фоновая работа уступает ручному тесту и восстановлению связи.</summary>
     private static bool backgroundMustYield() =>
         MonitorCoordinator.fullTestRunning || ProxyState.state.value.serverKey == null || TunnelHealth.snapshot().phase == TunnelHealth.Phase.RECOVERING;
@@ -1663,7 +1666,7 @@ public static class NetworkMonitor
     internal static bool worthLeaving(double candMbps, double curMbps, AppSettings s) =>
         candMbps >= s.degradationMinMbps && candMbps >= curMbps * s.keepBestMultiplier;
 
-    private static async Task maybeStepFromDegraded(Context app, AppSettings cur, string curKey, double passiveDown)
+    internal static async Task maybeStepFromDegraded(Context app, AppSettings cur, string curKey, double passiveDown)
     {
         if (cur.degradationMinMbps <= 0.0) return;                        // фича выключена
         if (passiveDown >= cur.degradationMinMbps) return;                // не деградация — туннель тянет
@@ -1692,11 +1695,17 @@ public static class NetworkMonitor
             foreach (var cand in ordered)
             {
                 if (ProxyState.state.value.serverKey != curKey) return;   // пользователь/лестница сменили — не вмешиваемся
-                var candMbps = ServerSpeedTester.measureSpeed(app, cand); // замер temp-инстансом (активный не дёргаем)
+                var candMbps = measureCandidate(app, cand);               // замер temp-инстансом (активный не дёргаем)
                 SubscriptionManager.applySpeedResults(app, new Dictionary<string, double> { [SubscriptionManager.serverKey(cand)] = candMbps });
                 if (ProxyState.state.value.serverKey != curKey) return;
                 if (worthLeaving(candMbps, passiveDown, cur))
                 {
+                    // Потребление — ещё не скорость: браузер читает страницу, а туннель тянет 15 Мбит/с. Правило Elyor — уходить, только
+                    // если уверены, поэтому перед уходом меряем сам туннель. Замер не состоялся — уверенности нет, остаёмся.
+                    var curProfile = SubscriptionManager.allServers(app).FirstOrDefault(it => SubscriptionManager.serverKey(it) == curKey);
+                    var curMbps = curProfile != null ? measureEnough(app, curProfile, candMbps) : -1.0;
+                    if (ProxyState.state.value.serverKey != curKey) return;
+                    if (curMbps <= 0.0 || !worthLeaving(candMbps, Math.Max(curMbps, passiveDown), cur)) continue;
                     string cfg;
                     try { cfg = XrayConfigBuilder.build(cand); } catch (Exception) { continue; }
                     var from = ServerLabels.displayForKey(app, curKey);

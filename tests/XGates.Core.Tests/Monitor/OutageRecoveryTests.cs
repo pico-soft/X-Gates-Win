@@ -167,6 +167,34 @@ public sealed class OutageRecoveryTests : IDisposable
         Assert.True(NetworkMonitor.worthLeaving(2.0, 0.3, s));
     }
 
+    [Theory]
+    [InlineData(15.0, false)]   // туннель тянет 15, браузер просто читал страницу: по потреблению он выглядел как 1 Мбит/с
+    [InlineData(-1.0, false)]   // замер не состоялся: уверенности нет, а данные через туннель шли
+    [InlineData(0.8, true)]     // туннель правда медленный
+    public void Consumption_is_not_the_speed_of_the_tunnel(double curMeasured, bool switches)
+    {
+        var servers = Import(net.StartVlessServer(), net.StartVlessServer());
+        var active = servers.First(it => it.remarks == "srv0");
+        var other = servers.First(it => it.remarks == "srv1");
+        SubscriptionManager.applyPingResults(ctx, servers.ToDictionary(SubscriptionManager.serverKey, _ => 20));
+        SubscriptionManager.applySpeedResults(ctx, new Dictionary<string, double> { [SubscriptionManager.serverKey(other)] = 5.0 });
+        var (savedEnough, savedCandidate) = (NetworkMonitor.measureEnough, NetworkMonitor.measureCandidate);
+        NetworkMonitor.measureEnough = (_, _, _) => curMeasured;
+        NetworkMonitor.measureCandidate = (_, _) => 5.0;
+        try
+        {
+            Start(active);
+            var activeKey = SubscriptionManager.serverKey(active);
+            var settings = SettingsStore.current() with { degradationCheckSec = 0 };
+            NetworkMonitor.maybeStepFromDegraded(ctx, settings, activeKey, passiveDown: 1.0).Wait();
+            var expected = SubscriptionManager.serverKey(switches ? other : active);
+            Assert.True(WaitUntil(() => ProxyState.state.value.serverKey == expected, 5_000), ProxyState.state.value.serverKey);
+            Thread.Sleep(500);
+            Assert.Equal(expected, ProxyState.state.value.serverKey);
+        }
+        finally { (NetworkMonitor.measureEnough, NetworkMonitor.measureCandidate) = (savedEnough, savedCandidate); }
+    }
+
     [Fact]
     public void Stored_speed_alone_never_moves_us_off_a_live_tunnel()
     {
