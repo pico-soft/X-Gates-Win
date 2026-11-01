@@ -258,8 +258,8 @@ public partial class MainWindow : Window
         public Visibility PingVisibility => V(!r.paused && r.pingMs != null);
         public string PingAge => r.pingAge;
         public Visibility PingAgeVisibility => V(!r.paused && r.pingMs != null && r.pingAge.Length > 0);
-        // Глаз = ЧТО СДЕЛАЕТ нажатие: включённый → перечёркнутый (выключить); исключённый → открытый (вернуть).
-        public string EyeGlyph => r.paused ? "" : "";
+        // Надпись = ЧТО СДЕЛАЕТ нажатие. Значка глаза нет: на Windows 10 он может показаться пустым квадратиком (Elyor 2026-11-01).
+        public string EyeText => r.paused ? "Вернуть" : "Скрыть";
         public string EyeTip => r.paused ? "Использовать снова" : "Не использовать";
         public Brush EyeBrush => r.paused ? Gray : new SolidColorBrush(Color.FromRgb(0x15, 0x65, 0xC0));
         private bool quick => r.speedFull == false && r.speedMbps is > 0.0;

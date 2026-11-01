@@ -165,8 +165,10 @@ public static partial class FirefoxSetup
         "user_pref(\"network.proxy.socks\", \"127.0.0.1\");",
         $"user_pref(\"network.proxy.socks_port\", {socksPort});",
         "user_pref(\"network.proxy.socks_version\", 5);",
-        "user_pref(\"network.proxy.socks_remote_dns\", true);",
-        "user_pref(\"network.proxy.socks5_remote_dns\", true);",
+        // Windows 10, Elyor 2026-11-01: с этой галкой Firefox не открывал сайты, без неё заработал. Причину не нашли, на настоящем
+        // Firefox раннера сбой не повторился. Утечки нет: сайты идут через HTTP-прокси, имена там разрешает он.
+        "user_pref(\"network.proxy.socks_remote_dns\", false);",
+        "user_pref(\"network.proxy.socks5_remote_dns\", false);",
         "user_pref(\"network.proxy.share_proxy_settings\", false);",
         "user_pref(\"network.proxy.http\", \"127.0.0.1\");",
         $"user_pref(\"network.proxy.http_port\", {httpPort});",

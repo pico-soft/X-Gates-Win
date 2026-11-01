@@ -69,7 +69,7 @@ public sealed class FirefoxSetupTests : IDisposable
         Assert.Contains("user_pref(\"network.proxy.socks\", \"127.0.0.1\");", UserJs);
         Assert.Contains("user_pref(\"network.proxy.socks_port\", 10815);", UserJs);
         Assert.Contains("user_pref(\"network.proxy.socks_version\", 5);", UserJs);
-        Assert.Contains("user_pref(\"network.proxy.socks5_remote_dns\", true);", UserJs);
+        Assert.Contains("user_pref(\"network.proxy.socks5_remote_dns\", false);", UserJs);
         Assert.Contains("user_pref(\"network.proxy.http\", \"127.0.0.1\");", UserJs);
         Assert.Contains("user_pref(\"network.proxy.http_port\", 10816);", UserJs);
         Assert.Contains("user_pref(\"network.proxy.ssl\", \"127.0.0.1\");", UserJs);

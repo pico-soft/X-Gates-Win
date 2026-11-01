@@ -24,9 +24,9 @@
                         <TextBlock Text="{Binding PingText}" Foreground="{StaticResource Gray}" FontSize="11" Visibility="{Binding PingVisibility}" />
                         <TextBlock Text="{Binding PingAge}" Foreground="{StaticResource Gray}" FontSize="11" Visibility="{Binding PingAgeVisibility}" />
                     </StackPanel>
-                    <Button Grid.Column="1" Content="{Binding EyeGlyph}" ToolTip="{Binding EyeTip}" Click="OnToggleUse" Tag="{Binding}"
+                    <Button Grid.Column="1" Content="{Binding EyeText}" ToolTip="{Binding EyeTip}" Click="OnToggleUse" Tag="{Binding}"
                             Background="Transparent" BorderThickness="0" Padding="6,2" Margin="4,0" VerticalAlignment="Center"
-                            FontFamily="Segoe MDL2 Assets" Foreground="{Binding EyeBrush}" />
+                            FontSize="11" Foreground="{Binding EyeBrush}" />
                     <StackPanel Grid.Column="2" Width="96" VerticalAlignment="Center">
                         <TextBlock Text="{Binding SpeedText}" Foreground="{Binding SpeedBrush}" FontWeight="{Binding SpeedWeight}" TextAlignment="Right" />
                         <TextBlock Text="{Binding SpeedAge}" Foreground="{StaticResource Gray}" FontSize="11" TextAlignment="Right" Visibility="{Binding SpeedAgeVisibility}" />
