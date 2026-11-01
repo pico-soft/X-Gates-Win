@@ -43,12 +43,13 @@ public static class MonitorCoordinator
 
     // Идёт перебор кандидатов монитором (он уже крутит temp-инстансы). Ступень 5 каскада не должна
     // поднимать ЕЩЁ один temp-инстанс параллельно — пропускается на это время.
-    private static volatile bool _monitorSearch;
     public static bool monitorSearchRunning
     {
-        get => _monitorSearch;
-        set => _monitorSearch = value;
+        get => Volatile.Read(ref searchDepth) > 0;
+        // Счётчик, а не флаг: фоновый рейтинг и лестница восстановления идут одновременно, и окончание одного не снимает отметку другого.
+        set { if (value) Interlocked.Increment(ref searchDepth); else Interlocked.Decrement(ref searchDepth); }
     }
+    private static int searchDepth;
 
     // CONFLATED: держим максимум один сигнал; несколько wake() подряд = одно пробуждение.
     private static readonly SemaphoreSlim wakeups = new(0, 1);

@@ -182,10 +182,13 @@ public static class NetworkMonitor
     // цикла монитора (иначе рестарт дал бы повторный прогон в тот же день).
     private static volatile int lastMorningRateDay = -1;
     // Пр.127.C: когда последний раз делали ШАГ по деградации (throttle между шагами). Переживает пересоздание цикла.
+    private static Task? backgroundWork;
     private static long lastDegradationMs;
     // Сколько ЖИВЫХ по пингу кандидатов пробуем при шаге с деградировавшего активного (ранняя остановка на первом
     // годном). >1 — чтобы мёртвый призрак на вершине по старой скорости не съедал единственную попытку (полевой S908E).
     private const int DEGRADED_STEP_CANDIDATES = 3;
+    private const int RECOVERY_RACE_CANDIDATES = 24;
+    private const long RECOVERY_RACE_WAIT_MS = 30_000L;
 
     // Пр.146 Ф3: СТАБИЛЬНОСТЬ. Считаем «падения» сервера за окно (когда он был активным и связь оборвалась).
     // Часто падающий («нестабильный») опускается в подборе В САМЫЙ НИЗ — предпочитаем стабильный, пусть чуть
@@ -271,6 +274,7 @@ public static class NetworkMonitor
         var lastTunnelBytes = 0L;
         var lastSpeedSampleMs = 0L;      // живая скорость плашки: когда последний раз сэмплировали
         var lastActiveProbeMs = 0L;      // когда последний раз делали АКТИВНУЮ пробу (в простое)
+        Task? speedSample = null;        // идущий фоновый замер скорости плашки
         var lastExactAlarm = false;      // Промпт 118: последний тик поставлен ТОЧНЫМ будильником? (для лога/диагностики)
         var lastWhiteEvalMs = 0L;        // Пр.140: когда последний раз оценивали режим белых списков
         var lastWhiteRefreshMs = 0L;     // Пр.140: когда последний раз обновляли источники белого списка
@@ -284,6 +288,7 @@ public static class NetworkMonitor
         var lastFullCycleMs = 0L;           // дебаунс паразитных пробуждений: когда последний раз делали ДОРОГУЮ работу цикла
         var lastTopPingMs = 0L;             // фоновый рейтинг: когда последний раз пинговали ТОП (держим его живость)
         var lastTopRateMs = 0L;             // фоновый рейтинг: когда последний раз делали ПОЛНЫЙ замер топа (перестройка)
+        var ipUnconfirmed = false;          // внешний IP не получен: зелёной плашки не будет, пока не получим
         var lastIpRefreshMs = 0L;           // Пр.150: когда последний раз тянули внешний IP для ПОКАЗА на плашке
         var screenOffSinceMs = 0L;          // лестница интервалов: когда экран ПОГАС (0 = экран включён/ещё не гас)
         var cycleLock = MonitorAlarm.newWakeLock(app);   // держит CPU на время ОДНОГО цикла (на Windows — no-op)
@@ -483,7 +488,8 @@ public static class NetworkMonitor
                             {
                                 // пинг есть, но трафик реально НЕ идёт (полу-мёртвый) → в восстановление. Таймер НЕ двигаем:
                                 // следующий цикл перемерит; устойчивый провал → grace истечёт → лестница сменит сервер.
-                                aliveNow = false;
+                                // Замер идёт отдельным временным ядром и мог упасть сам по себе: судим по самому туннелю.
+                                aliveNow = ExternalIpChecker.fetch() != null;
                             }
                             else
                             {
@@ -505,119 +511,133 @@ public static class NetworkMonitor
                     lastLiveConfirmedMs = now(); graceRecheck = false;
                     onRecovered(app);
                     // Внешний IP — ТОЛЬКО для показа, реже (флап не влияет на вердикт). Не вышло — держим прежний.
-                    string ipShown;
-                    if (now() - lastIpRefreshMs >= IP_REFRESH_MS)
+                    // Зелёная плашка — только по факту: открытый порт сервера ещё не значит, что через него идут данные.
+                    var ipShown = TunnelHealth.snapshot().ip;
+                    if (ipUnconfirmed || now() - lastIpRefreshMs >= IP_REFRESH_MS)
                     {
-                        lastIpRefreshMs = now(); ipShown = ExternalIpChecker.fetch() ?? TunnelHealth.snapshot().ip;
+                        lastIpRefreshMs = now();
+                        var fresh = ExternalIpChecker.fetch();
+                        ipUnconfirmed = fresh == null;
+                        if (fresh != null) ipShown = fresh;
                     }
-                    else ipShown = TunnelHealth.snapshot().ip;
-                    TunnelHealth.ok(ipShown, now(), curKey0 ?? "");   // Пр.123.B: подтверждение принадлежит активному серверу
+                    if (ipUnconfirmed) TunnelHealth.setPhase(TunnelHealth.Phase.VERIFYING, now(), "связь не подтверждена — проверяю");
+                    else TunnelHealth.ok(ipShown, now(), curKey0 ?? "");   // Пр.123.B: подтверждение принадлежит активному серверу
                     failures = 0; backoffMs = 0; restartedKeySinceOk = null;   // Промпт 102: связь ок — сбросить «уже перезапускали»
                     MonitorStatus.update(true, "ок", now(), cycles);
                     // ЖИВАЯ скорость плашки (гибрид): раз в цикл сэмплируем — реальный трафик даёт скорость
                     // бесплатно, иначе активная проба в простое. Держим ↓/↑ и время замера свежими.
-                    if (cur.liveSpeedEnabled && now() - lastSpeedSampleMs >= SPEED_SAMPLE_MIN_GAP_MS)
+                    // Замер идёт в фоне: внутри цикла он на десятки секунд останавливал проверку связи, и обрыв никто не замечал.
+                    if (cur.liveSpeedEnabled && now() - lastSpeedSampleMs >= SPEED_SAMPLE_MIN_GAP_MS && speedSample is not { IsCompleted: false })
                     {
                         lastSpeedSampleMs = now();
-                        var prevProbe = lastActiveProbeMs;
-                        var r = await runCatching(() => sampleTunnelSpeed(app, cur, prevProbe));
-                        if (r.ok) lastActiveProbeMs = r.value;
-                        else MonitorLog.@event(app, "error", "Ошибка замера скорости", msg(r.err!));
-                    }
-                    // Пр.146.Ф2 + ТЗ Elyor 2026-10-14 (свежий пинг «Живых»): периодически пингуем ВСЕХ кандидатов —
-                    // убираем мёртвых И ловим воскресших. Раз в PING_REFRESH_INTERVAL_MS (15 мин). НЕ гейтим по
-                    // userTrafficActive — пинг это КБ, активному трафику/замеру НЕ мешает.
-                    if (now() - lastPingRefreshMs >= PING_REFRESH_INTERVAL_MS)
-                    {
-                        lastPingRefreshMs = now();
-                        var e4 = await runCatching(() => refreshAllPings(app, cur));
-                        if (!e4.ok) MonitorLog.@event(app, "error", "Ошибка пинга всех", msg(e4.err!));
-                    }
-                    // Вторичное: «держать лучший». Пр.126.B: ДЕФОЛТ ВЫКЛ (monitorOptimizeSec=0) — замеры активного и
-                    // кандидата несопоставимы, решения шли бы по шуму. Пр.125.E: в экономии тоже выкл. Когда пользователь
-                    // включил — предохранители Пр.126.A (Wi-Fi / давно-нет-трафика / текущий-уже-быстрый) + не во время
-                    // активной загрузки (чтобы не делить канал и не портить замер).
-                    if (!cur.trafficSaveMode && cur.monitorEnabled && cur.activeOptimizeSec > 0 && heavyMeasureAllowed(app) && now() - lastOptimizeMs >= cur.activeOptimizeSec * 1000L)
-                    {
-                        lastOptimizeMs = now();
-                        var skip = optimizeSkipReason(app, cur, lastUserTrafficMs);
-                        if (skip != null) MonitorLog.@event(app, "monitor", "Перемер пропущен (Пр.126)", skip);
-                        else if (await userTrafficActive()) { /* идёт загрузка — не мешаем и не портим замер */ }
-                        else
+                        var prevProbe = Interlocked.Read(ref lastActiveProbeMs);
+                        speedSample = Task.Run(async () =>
                         {
-                            var e5 = await runCatching(() => optimizeToFastest(app, cur));
-                            if (e5 != null) MonitorLog.@event(app, "error", "Ошибка оптимизации", msg(e5));
+                            var r = await runCatching(() => sampleTunnelSpeed(app, cur, prevProbe));
+                            if (r.ok) Interlocked.Exchange(ref lastActiveProbeMs, r.value);
+                            else MonitorLog.@event(app, "error", "Ошибка замера скорости", msg(r.err!));
+                        });
+                    }
+                    // Фоновая работа не должна мешать главному: на Android она шла внутри цикла, и на десятках серверов рейтинг минутами
+                    // не давал заметить обрыв (Windows 10, Elyor 2026-11-01). Одна на все циклы: при смене сервера цикл запускается заново.
+                    if (backgroundWork is not { IsCompleted: false })
+                        backgroundWork = Task.Run(async () =>
+                        {
+                        // Пр.146.Ф2 + ТЗ Elyor 2026-10-14 (свежий пинг «Живых»): периодически пингуем ВСЕХ кандидатов —
+                        // убираем мёртвых И ловим воскресших. Раз в PING_REFRESH_INTERVAL_MS (15 мин). НЕ гейтим по
+                        // userTrafficActive — пинг это КБ, активному трафику/замеру НЕ мешает.
+                        if (now() - lastPingRefreshMs >= PING_REFRESH_INTERVAL_MS)
+                        {
+                            lastPingRefreshMs = now();
+                            var e4 = await runCatching(() => refreshAllPings(app, cur));
+                            if (!e4.ok) MonitorLog.@event(app, "error", "Ошибка пинга всех", msg(e4.err!));
                         }
-                    }
-                    // Пр.141: в ЭКОНОМИИ автоперемер выше выключен, поэтому полу-живой сервер (IP-чек проходит, но
-                    // реально плохо) сам не чинится. Раз в economyRecheckSec — ОДИН дешёвый замер достаточности активного;
-                    // если ниже порога деградации, шагаем на лучшего кандидата (переиспользуем maybeStepFromDegraded).
-                    var recheckKey = ProxyState.state.value.serverKey;
-                    if (cur.trafficSaveMode && cur.economyRecheckSec > 0 && !await userTrafficActive() && recheckKey != null &&
-                        heavyMeasureAllowed(app) &&   // батарея: не мерить активный ночью на батарее (пинг держит живость)
-                        now() - lastEconomyRecheckMs >= cur.economyRecheckSec * 1000L)
-                    {
-                        lastEconomyRecheckMs = now();
-                        var curSrv = SubscriptionManager.allServers(app).FirstOrDefault(it => SubscriptionManager.serverKey(it) == recheckKey);
-                        if (curSrv != null)
+                        // Вторичное: «держать лучший». Пр.126.B: ДЕФОЛТ ВЫКЛ (monitorOptimizeSec=0) — замеры активного и
+                        // кандидата несопоставимы, решения шли бы по шуму. Пр.125.E: в экономии тоже выкл. Когда пользователь
+                        // включил — предохранители Пр.126.A (Wi-Fi / давно-нет-трафика / текущий-уже-быстрый) + не во время
+                        // активной загрузки (чтобы не делить канал и не портить замер).
+                        if (!cur.trafficSaveMode && cur.monitorEnabled && cur.activeOptimizeSec > 0 && heavyMeasureAllowed(app) && now() - lastOptimizeMs >= cur.activeOptimizeSec * 1000L)
                         {
-                            var e6 = await runCatching(async () =>
+                            lastOptimizeMs = now();
+                            var skip = optimizeSkipReason(app, cur, lastUserTrafficMs);
+                            if (skip != null) MonitorLog.@event(app, "monitor", "Перемер пропущен (Пр.126)", skip);
+                            else if (await userTrafficActive()) { /* идёт загрузка — не мешаем и не портим замер */ }
+                            else
                             {
-                                var mbps = ServerSpeedTester.measureSufficiency(app, curSrv, cur.sufficientMbps.coerceAtLeast(0.1));
-                                MonitorLog.@event(app, "monitor", "Экономия: ре-чек активного", $"{fmt(mbps)} Мбит/с");
-                                if (mbps >= 0.0 && mbps <= cur.degradationMinMbps) await maybeStepFromDegraded(app, cur, recheckKey, mbps);
-                            });
-                            if (e6 != null) MonitorLog.@event(app, "error", "Ошибка ре-чека экономии", msg(e6));
+                                var e5 = await runCatching(() => optimizeToFastest(app, cur));
+                                if (e5 != null) MonitorLog.@event(app, "error", "Ошибка оптимизации", msg(e5));
+                            }
                         }
-                    }
-                    // ── УТРЕННИЙ РЕЙТИНГ (~6:00, ТЗ Elyor): раз в сутки одной короткой серией освежаем топ-N живых, чтобы
-                    // к пробуждению был свежий быстрый сервер — ВМЕСТО всеночной молотьбы. Пропускается при ≤15% заряда.
-                    {
-                        var cal = DateTime.Now;
-                        var hour = cal.Hour;
-                        var doy = cal.DayOfYear;
-                        var batteryOk = isCharging(app) || batteryLevel(app) > LOW_BATTERY_PCT;
-                        if (hour == MORNING_RATE_HOUR && lastMorningRateDay != doy && batteryOk && !await userTrafficActive() &&
+                        // Пр.141: в ЭКОНОМИИ автоперемер выше выключен, поэтому полу-живой сервер (IP-чек проходит, но
+                        // реально плохо) сам не чинится. Раз в economyRecheckSec — ОДИН дешёвый замер достаточности активного;
+                        // если ниже порога деградации, шагаем на лучшего кандидата (переиспользуем maybeStepFromDegraded).
+                        var recheckKey = ProxyState.state.value.serverKey;
+                        if (cur.trafficSaveMode && cur.economyRecheckSec > 0 && !await userTrafficActive() && recheckKey != null &&
+                            heavyMeasureAllowed(app) &&   // батарея: не мерить активный ночью на батарее (пинг держит живость)
+                            now() - lastEconomyRecheckMs >= cur.economyRecheckSec * 1000L)
+                        {
+                            lastEconomyRecheckMs = now();
+                            var curSrv = SubscriptionManager.allServers(app).FirstOrDefault(it => SubscriptionManager.serverKey(it) == recheckKey);
+                            if (curSrv != null)
+                            {
+                                var e6 = await runCatching(async () =>
+                                {
+                                    var mbps = ServerSpeedTester.measureSufficiency(app, curSrv, cur.sufficientMbps.coerceAtLeast(0.1));
+                                    MonitorLog.@event(app, "monitor", "Экономия: ре-чек активного", $"{fmt(mbps)} Мбит/с");
+                                    if (mbps >= 0.0 && mbps <= cur.degradationMinMbps) await maybeStepFromDegraded(app, cur, recheckKey, mbps);
+                                });
+                                if (e6 != null) MonitorLog.@event(app, "error", "Ошибка ре-чека экономии", msg(e6));
+                            }
+                        }
+                        // ── УТРЕННИЙ РЕЙТИНГ (~6:00, ТЗ Elyor): раз в сутки одной короткой серией освежаем топ-N живых, чтобы
+                        // к пробуждению был свежий быстрый сервер — ВМЕСТО всеночной молотьбы. Пропускается при ≤15% заряда.
+                        {
+                            var cal = DateTime.Now;
+                            var hour = cal.Hour;
+                            var doy = cal.DayOfYear;
+                            var batteryOk = isCharging(app) || batteryLevel(app) > LOW_BATTERY_PCT;
+                            if (hour == MORNING_RATE_HOUR && lastMorningRateDay != doy && batteryOk && !await userTrafficActive() &&
+                                !MonitorCoordinator.monitorSearchRunning && !MonitorCoordinator.fullTestRunning)
+                            {
+                                lastMorningRateDay = doy;
+                                var e7 = await runCatching(() => morningRateTop(app, cur));
+                                if (e7 != null) MonitorLog.@event(app, "error", "Ошибка утреннего рейтинга", msg(e7));
+                            }
+                        }
+                        // ── ФОНОВЫЙ РЕЙТИНГ ТОПА (ТЗ Elyor): держим топ-N свежим. Развилка ШНУР/БАТАРЕЯ × сеть: на шнуре
+                        // агрессивно (батарея не тратится), на батарее — в основном по событию «отвалилось >50% топа». Не во
+                        // время загрузки пользователя и не во время подбора монитором. На «экран выкл + батарея» — целиком
+                        // откладываем до зарядки/экрана (см. heavyMeasureAllowed).
+                        if (!await userTrafficActive() && heavyMeasureAllowed(app) &&
                             !MonitorCoordinator.monitorSearchRunning && !MonitorCoordinator.fullTestRunning)
                         {
-                            lastMorningRateDay = doy;
-                            var e7 = await runCatching(() => morningRateTop(app, cur));
-                            if (e7 != null) MonitorLog.@event(app, "error", "Ошибка утреннего рейтинга", msg(e7));
+                            var charging = isCharging(app);
+                            var mobile = EconomyNet.lastKnownMobile;
+                            var screenOn = screenInteractive(app);
+                            // 1) ПИНГ ТОПА (часто, дёшево) → детект «поредел >50%».
+                            var pingTopEvery = charging ? TOP_PING_CHARGING_MS : screenOn ? TOP_PING_BATTERY_SCREEN_MS : long.MaxValue;
+                            var topDecayed = false;
+                            if (now() - lastTopPingMs >= pingTopEvery)
+                            {
+                                lastTopPingMs = now();
+                                var r8 = await runCatching(() => pingTopAndDetectDecay(app, cur));
+                                if (r8.ok) topDecayed = r8.value;
+                                else MonitorLog.@event(app, "error", "Ошибка пинга топа", msg(r8.err!));
+                            }
+                            // 2) ПОЛНЫЙ ЗАМЕР ТОПА (рейтинг): по расписанию (шнур/сеть) ИЛИ по событию (топ поредел).
+                            var rateEvery =
+                                charging && !mobile ? TOP_RATE_CHARGING_WIFI_MS :
+                                charging && mobile ? TOP_RATE_CHARGING_MOBILE_MS :
+                                !charging && !mobile ? TOP_RATE_BATTERY_WIFI_MS :
+                                long.MaxValue;   // батарея + моб → только по событию
+                            if (topDecayed || now() - lastTopRateMs >= rateEvery)
+                            {
+                                lastTopRateMs = now();
+                                var e9 = await runCatching(() => rebuildAndRateTop(app, cur));
+                                if (e9 != null) MonitorLog.@event(app, "error", "Ошибка фон-рейтинга топа", msg(e9));
+                            }
                         }
-                    }
-                    // ── ФОНОВЫЙ РЕЙТИНГ ТОПА (ТЗ Elyor): держим топ-N свежим. Развилка ШНУР/БАТАРЕЯ × сеть: на шнуре
-                    // агрессивно (батарея не тратится), на батарее — в основном по событию «отвалилось >50% топа». Не во
-                    // время загрузки пользователя и не во время подбора монитором. На «экран выкл + батарея» — целиком
-                    // откладываем до зарядки/экрана (см. heavyMeasureAllowed).
-                    if (!await userTrafficActive() && heavyMeasureAllowed(app) &&
-                        !MonitorCoordinator.monitorSearchRunning && !MonitorCoordinator.fullTestRunning)
-                    {
-                        var charging = isCharging(app);
-                        var mobile = EconomyNet.lastKnownMobile;
-                        var screenOn = screenInteractive(app);
-                        // 1) ПИНГ ТОПА (часто, дёшево) → детект «поредел >50%».
-                        var pingTopEvery = charging ? TOP_PING_CHARGING_MS : screenOn ? TOP_PING_BATTERY_SCREEN_MS : long.MaxValue;
-                        var topDecayed = false;
-                        if (now() - lastTopPingMs >= pingTopEvery)
-                        {
-                            lastTopPingMs = now();
-                            var r8 = await runCatching(() => pingTopAndDetectDecay(app, cur));
-                            if (r8.ok) topDecayed = r8.value;
-                            else MonitorLog.@event(app, "error", "Ошибка пинга топа", msg(r8.err!));
-                        }
-                        // 2) ПОЛНЫЙ ЗАМЕР ТОПА (рейтинг): по расписанию (шнур/сеть) ИЛИ по событию (топ поредел).
-                        var rateEvery =
-                            charging && !mobile ? TOP_RATE_CHARGING_WIFI_MS :
-                            charging && mobile ? TOP_RATE_CHARGING_MOBILE_MS :
-                            !charging && !mobile ? TOP_RATE_BATTERY_WIFI_MS :
-                            long.MaxValue;   // батарея + моб → только по событию
-                        if (topDecayed || now() - lastTopRateMs >= rateEvery)
-                        {
-                            lastTopRateMs = now();
-                            var e9 = await runCatching(() => rebuildAndRateTop(app, cur));
-                            if (e9 != null) MonitorLog.@event(app, "error", "Ошибка фон-рейтинга топа", msg(e9));
-                        }
-                    }
+                        });
                     continue;
                 }
 
@@ -769,6 +789,9 @@ public static class NetworkMonitor
             var list2 = orderFastCandidates(poolAlive.Where(it => tierOf(it) == ServerFilter.Tier.PREVIOUS).ToList(), unstable);
             var restLikely = orderFastCandidates(poolAlive.Where(it => tierOf(it) == ServerFilter.Tier.NONE).ToList(), unstable);
             var recent = list1.Concat(list2).Concat(restLikely).DistinctBy(SubscriptionManager.serverKey).ToList();
+            // ТЗ Elyor 2026-11-01: следующий живой — раньше пинга всех. Пинг ниже идёт по одному и на сотнях серверов занимал минуты без связи.
+            if (await raceToFirstAlive(app, recent, startKey, doMeasure)) return SwitchResult.SWITCHED;
+            if (aborted(startKey)) return SwitchResult.ABORTED;
             var pingUpd = new Dictionary<string, int>();
             var responders = new List<ServerProfile>();
             for (int i = 0; i < recent.Count; i++)
@@ -894,6 +917,24 @@ public static class NetworkMonitor
         {
             MonitorCoordinator.monitorSearchRunning = false;
         }
+    }
+
+    /// <summary>Фоновая работа уступает ручному тесту и восстановлению связи.</summary>
+    private static bool backgroundMustYield() =>
+        MonitorCoordinator.fullTestRunning || ProxyState.state.value.serverKey == null || TunnelHealth.snapshot().phase == TunnelHealth.Phase.RECOVERING;
+
+    /// <summary>Параллельная проверка передачей данных: первый живой становится активным. false — никто не успел.</summary>
+    private static async Task<bool> raceToFirstAlive(Context app, IReadOnlyList<ServerProfile> candidates, string? fromKey, bool doMeasure)
+    {
+        if (candidates.Count == 0) return false;
+        TunnelHealth.setPhase(TunnelHealth.Phase.RECOVERING, now(), "ищу живой сервер");
+        var race = new FirstAliveRace(app, _ => { });
+        foreach (var c in candidates.Take(RECOVERY_RACE_CANDIDATES)) race.offer(c);
+        race.complete();
+        await Task.Run(() => race.join(TimeSpan.FromMilliseconds(RECOVERY_RACE_WAIT_MS)));
+        race.cancel();
+        if (race.winner is not { } won || aborted(fromKey)) return false;
+        return (await connectMeasureLive(app, won, fromKey, doMeasure)).confirmed;
     }
 
     /**
@@ -1232,7 +1273,7 @@ public static class NetworkMonitor
      * найдётся). Топ свежий → НЕ мерим. Пинг — только для первого приближения/сортировки неизмеренных. Замеры
      * сопоставимы (Пр.130: и активный, и кандидатов — temp-инстансом). Массового замера всех живых в фоне НЕТ.
      */
-    private static Task optimizeToFastest(Context app, AppSettings s)
+    internal static Task optimizeToFastest(Context app, AppSettings s)
     {
         var curKey = ProxyState.state.value.serverKey;
         if (curKey == null) return Task.CompletedTask;
@@ -1288,7 +1329,7 @@ public static class NetworkMonitor
             string? bestKey = null; var bestMbps = 0.0;
             foreach (var c in toMeasure.Select(kv => kv.Value))
             {
-                if (MonitorCoordinator.fullTestRunning) return Task.CompletedTask;               // ручной тест — уступаем
+                if (backgroundMustYield()) return Task.CompletedTask;                            // ручной тест или обрыв — уступаем
                 if (ProxyState.state.value.serverKey != curKey) return Task.CompletedTask;       // пользователь сменил — уступаем
                 var k = key(c);
                 if (k == curKey) continue;
@@ -1298,12 +1339,26 @@ public static class NetworkMonitor
                 if (mbps > bestMbps && !isUnstableKey(k)) { bestMbps = mbps; bestKey = k; }
             }
             // лучший из СВЕЖЕГО топа тоже участвует в решении (его не перемеряли — он свежий); нестабильных не берём.
-            foreach (var p in freshTop) { var sp = p.speedMbps ?? 0.0; if (sp > bestMbps && !isUnstableKey(key(p))) { bestMbps = sp; bestKey = key(p); } }
+            // Число из памяти — только повод проверить, не основание уйти с живого туннеля: «свежим» считается замер до
+            // topFreshSec (6 ч), сервер мог давно умереть (Windows 10, Elyor 2026-11-01: монитор раз за разом уводил на мёртвый №1).
+            var bestStored = freshTop.FirstOrDefault(p => key(p) != curKey && !results.ContainsKey(key(p)) && !isUnstableKey(key(p)) &&
+                (p.speedMbps ?? 0.0) > bestMbps && curMbps > 0 && (p.speedMbps ?? 0.0) >= curMbps * s.keepBestMultiplier);
+            if (bestStored != null)
+            {
+                var k = key(bestStored);
+                var mbps = ServerSpeedTester.measureSufficiency(app, bestStored, enough);
+                if (backgroundMustYield() || ProxyState.state.value.serverKey != curKey) return Task.CompletedTask;
+                results[k] = mbps;
+                if (mbps > bestMbps) { bestMbps = mbps; bestKey = k; }
+                // Провал скорость в реестре не затирает (Пр.88), поэтому из «Живых» его убирает пинг, иначе он так и стоял бы первым.
+                if (mbps <= 0.0) SubscriptionManager.applyPingResults(app, new Dictionary<string, int> { [k] = -1 });
+            }
             SubscriptionManager.applySpeedResults(app, results);
             // ПРАВИЛО «ДЕРЖАТЬ ЛУЧШИЙ» (Промпт 90.A): переключаемся, если лучший быстрее текущего КРАТНО
             // (в keepBestMultiplier раз), даже когда текущий выше порога. Кратно — чтобы шум не дёргал.
             if (bestKey != null && bestKey != curKey && curMbps > 0 && bestMbps >= curMbps * s.keepBestMultiplier)
             {
+                if (backgroundMustYield() || ProxyState.state.value.serverKey != curKey) return Task.CompletedTask;
                 var target = all.FirstOrDefault(it => key(it) == bestKey);
                 if (target == null) return Task.CompletedTask;
                 string cfg;
@@ -1437,7 +1492,7 @@ public static class NetworkMonitor
             var results = new Dictionary<string, double>();
             foreach (var p in top)
             {
-                if (MonitorCoordinator.fullTestRunning || ProxyState.state.value.serverKey == null) break;
+                if (backgroundMustYield()) break;
                 results[SubscriptionManager.serverKey(p)] = ServerSpeedTester.measureSufficiency(app, p, cap);
             }
             if (results.Count > 0) SubscriptionManager.applySpeedResults(app, results);
@@ -1503,7 +1558,7 @@ public static class NetworkMonitor
             if (needTop > 0)
                 foreach (var p in needMeasure)
                 {
-                    if (MonitorCoordinator.fullTestRunning || ProxyState.state.value.serverKey == null) break;
+                    if (backgroundMustYield()) break;
                     if (good.Count >= needTop || scanned >= maxScan) break;
                     var m = ServerSpeedTester.measureSpeedMinimal(app, p);
                     minimalByKey[key(p)] = m; minimalTagged[key(p)] = (m, false); scanned++;
@@ -1515,7 +1570,7 @@ public static class NetworkMonitor
             var fullTagged = new Dictionary<string, (double, bool)>();
             foreach (var p in reasonable)
             {
-                if (MonitorCoordinator.fullTestRunning || ProxyState.state.value.serverKey == null) break;
+                if (backgroundMustYield()) break;
                 fullTagged[key(p)] = (ServerSpeedTester.measureSpeed(app, p), true);   // полный/точный замер
             }
             if (fullTagged.Count > 0) SubscriptionManager.applySpeedResultsTagged(app, fullTagged);
@@ -1594,6 +1649,13 @@ public static class NetworkMonitor
      * Не чаще [degradationCheckSec]. Работает в ОБОИХ режимах (в экономии — «приемлемый», не «лучший»). Вызывается
      * ТОЛЬКО когда трафик был существенным (см. вызов), поэтому passiveDown — осмысленный признак капасити.
      */
+    /// <summary>
+    /// Правило Elyor: с живого туннеля уходим, только если уверены, что другой намного быстрее. [candMbps] — замер сейчас,
+    /// не число из памяти. Медленный туннель всё равно живой: «чуть быстрее» не повод его рвать.
+    /// </summary>
+    internal static bool worthLeaving(double candMbps, double curMbps, AppSettings s) =>
+        candMbps >= s.degradationMinMbps && candMbps >= curMbps * s.keepBestMultiplier;
+
     private static async Task maybeStepFromDegraded(Context app, AppSettings cur, string curKey, double passiveDown)
     {
         if (cur.degradationMinMbps <= 0.0) return;                        // фича выключена
@@ -1626,7 +1688,7 @@ public static class NetworkMonitor
                 var candMbps = ServerSpeedTester.measureSpeed(app, cand); // замер temp-инстансом (активный не дёргаем)
                 SubscriptionManager.applySpeedResults(app, new Dictionary<string, double> { [SubscriptionManager.serverKey(cand)] = candMbps });
                 if (ProxyState.state.value.serverKey != curKey) return;
-                if (candMbps >= cur.degradationMinMbps && candMbps > passiveDown)
+                if (worthLeaving(candMbps, passiveDown, cur))
                 {
                     string cfg;
                     try { cfg = XrayConfigBuilder.build(cand); } catch (Exception) { continue; }

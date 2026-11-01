@@ -7,6 +7,7 @@ using XGates.Core.Settings;
 using XGates.Core.Subscription;
 using XGates.Core.Tests.Libv2ray;
 using XGates.Core.Xray;
+using XGates.Core.Xray.Link;
 
 namespace XGates.Core.Tests.Monitor;
 
@@ -111,6 +112,122 @@ public sealed class OutageRecoveryTests : IDisposable
             $"журнал: {string.Join(" | ", MonitorLog.state.value.TakeLast(6).Select(e => e.text + " — " + e.detail))}");
         Assert.True(ProxyState.state.value.running);
         Assert.Contains(MonitorLog.state.value, e => e.kind == "switch");
+    }
+
+    private void Start(ServerProfile p)
+    {
+        XrayProxyService.start(ctx, XrayConfigBuilder.build(p), ServerLabels.full(p), SubscriptionManager.serverKey(p));
+        Assert.True(WaitUntil(() => ProxyState.state.value.running, 10_000), ProxyState.state.value.message);
+    }
+
+    private List<ServerProfile> Import(params int[] ports)
+    {
+        var body = string.Join("\n", ports.Select((p, i) => $"vless://{LocalTestNet.Uuid}@127.0.0.1:{p}?type=tcp&security=none#srv{i}"));
+        SubscriptionManager.init(ctx);
+        var (_, r) = SubscriptionManager.addLocalFromBody(ctx, body, "local");
+        Assert.True(r.ok, r.error);
+        return SubscriptionManager.allServers(ctx);
+    }
+
+    [Fact]
+    public void Open_server_port_alone_does_not_make_the_plate_green()
+    {
+        // Порт отвечает, а данные не идут: приёмник принимает соединение и молчит.
+        using var mute = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        mute.Start();
+        var active = Import(((System.Net.IPEndPoint)mute.LocalEndpoint).Port)[0];
+        // Экран выключен, батарея: монитор не тратит цикл на замеры скорости и сразу доходит до внешнего IP.
+        var savedCharging = Device.isCharging;
+        Device.isCharging = () => false;
+        Device.screenOn = false;
+        try
+        {
+            Start(active);
+            TunnelHealth.setPhase(TunnelHealth.Phase.VERIFYING, JavaSystem.currentTimeMillis(), "как после подключения из окна");
+            var end = Environment.TickCount64 + 40_000;
+            while (Environment.TickCount64 < end && MonitorStatus.state.value.state != "ок")
+            {
+                MonitorCoordinator.wake();
+                Thread.Sleep(250);
+                Assert.NotEqual(TunnelHealth.Phase.OK, TunnelHealth.snapshot().phase);
+            }
+            Assert.Equal("ок", MonitorStatus.state.value.state);   // цикл дошёл до проверки внешнего IP
+            Assert.NotEqual(TunnelHealth.Phase.OK, TunnelHealth.snapshot().phase);
+        }
+        finally { Device.isCharging = savedCharging; Device.screenOn = true; }
+    }
+
+    [Fact]
+    public void Live_tunnel_is_left_only_for_a_clearly_faster_server()
+    {
+        var s = SettingsStore.DEFAULTS with { degradationMinMbps = 2.0, keepBestMultiplier = 3.0 };
+        Assert.False(NetworkMonitor.worthLeaving(2.5, 1.9, s));   // «чуть быстрее» живой туннель не рвём
+        Assert.False(NetworkMonitor.worthLeaving(1.5, 0.1, s));   // кандидат сам ниже порога
+        Assert.True(NetworkMonitor.worthLeaving(6.0, 1.9, s));
+        Assert.True(NetworkMonitor.worthLeaving(2.0, 0.3, s));
+    }
+
+    [Fact]
+    public void Stored_speed_alone_never_moves_us_off_a_live_tunnel()
+    {
+        // №1 в списке: огромная скорость в памяти, а сервер уже мёртв. Третий сервер даёт монитору повод что-то мерить.
+        int a = net.StartVlessServer(), c = net.StartVlessServer(), dead = LocalTestNet.FreePort();
+        var servers = Import(a, dead, c);
+        var ghost = SubscriptionManager.serverKey(servers.First(it => it.remarks == "srv1"));
+        SubscriptionManager.applyPingResults(ctx, new Dictionary<string, int> { [ghost] = 20 });
+        SubscriptionManager.applySpeedResults(ctx, new Dictionary<string, double> { [ghost] = 1000.0 });
+        var active = servers.First(it => it.remarks == "srv0");
+        Start(active);
+
+        NetworkMonitor.optimizeToFastest(ctx, SettingsStore.current()).Wait();
+
+        Assert.Equal(SubscriptionManager.serverKey(active), ProxyState.state.value.serverKey);
+        Assert.Equal(-1, SubscriptionManager.allServers(ctx).First(it => SubscriptionManager.serverKey(it) == ghost).pingMs);   // ушёл из «Живых»
+    }
+
+    [Fact]
+    public void Failed_service_measure_does_not_condemn_a_tunnel_that_still_passes_traffic()
+    {
+        int a = net.StartVlessServer(), b = net.StartVlessServer();
+        var servers = Import(a, b);
+        var active = servers.First(it => it.remarks == "srv0");
+        // Служебный замер не проходит: адрес проверки закрыт. Сам туннель при этом жив: внешний IP через него получен.
+        ServerSpeedTester.probesOverrideForTest = [$"http://127.0.0.1:{LocalTestNet.FreePort()}/x"];
+        ExternalIpChecker.onceOverrideForTest = _ => "198.51.100.1";   // ответ без трафика: иначе монитор засчитает его за работу пользователя
+        Start(active);
+        var key = SubscriptionManager.serverKey(active);
+
+        // Служебный замер ждёт, пока закончится фоновый рейтинг, поэтому смотрим дольше одного цикла.
+        var end = Environment.TickCount64 + 45_000;
+        while (Environment.TickCount64 < end)
+        {
+            MonitorCoordinator.wake();
+            Thread.Sleep(250);
+            Assert.Equal(key, ProxyState.state.value.serverKey);
+        }
+    }
+
+    [Fact]
+    public void Next_live_server_is_found_before_pinging_everyone()
+    {
+        // Сто адресов-«чёрных дыр» с высокой сохранённой скоростью: пинг по одному занял бы 150 с.
+        int a = net.StartVlessServer(), b = net.StartVlessServer();
+        var holes = Enumerable.Range(1, 100).Select(i => $"vless://{LocalTestNet.Uuid}@10.255.254.{i}:443?type=tcp&security=none#hole{i}");
+        var live = new[] { a, b }.Select((p, i) => $"vless://{LocalTestNet.Uuid}@127.0.0.1:{p}?type=tcp&security=none#srv{i}");
+        SubscriptionManager.init(ctx);
+        var (_, r) = SubscriptionManager.addLocalFromBody(ctx, string.Join("\n", live.Concat(holes)), "local");
+        Assert.True(r.ok, r.error);
+        var all = SubscriptionManager.allServers(ctx);
+        var second = SubscriptionManager.serverKey(all.First(it => it.remarks == "srv1"));
+        SubscriptionManager.applyPingResults(ctx, all.ToDictionary(SubscriptionManager.serverKey, _ => 50));
+        SubscriptionManager.applySpeedResults(ctx, new Dictionary<string, double> { [second] = 90.0 });
+        var active = all.First(it => it.remarks == "srv0");
+        Start(active);
+        Assert.True(WaitUntil(() => TunnelHealth.snapshot().phase == TunnelHealth.Phase.OK, 25_000, wake: true), "связь не подтвердилась");
+
+        net.StopVlessServer(a);
+        Assert.True(WaitUntil(() => ProxyState.state.value.serverKey == second && ProxyState.state.value.running, 40_000, wake: true),
+            $"не переключился на следующий живой (сейчас {ProxyState.state.value.serverKey}, журнал: {string.Join(" | ", MonitorLog.state.value.TakeLast(6).Select(e => e.text + " " + e.detail))}): {TunnelHealth.snapshot().phase}, монитор: {MonitorStatus.state.value}");
     }
 
     [Fact]
