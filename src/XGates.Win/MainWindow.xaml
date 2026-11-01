@@ -219,7 +219,17 @@
         <TabItem x:Name="SettingsTab" Header="  Настройки  ">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel Margin="14,10">
-                    <TextBlock Style="{StaticResource Section}" Margin="0,0,0,6" Text="Локальный прокси" />
+                    <TextBlock Style="{StaticResource Section}" Margin="0,0,0,6" Text="Обновления" />
+                    <TextBlock x:Name="UpdateSummary" TextWrapping="Wrap" Margin="0,4" />
+                    <WrapPanel>
+                        <Button x:Name="UpdateCheckButton" Content="Проверить обновление" Click="OnUpdateCheck" />
+                        <Button x:Name="UpdateInstallButton" Content="Скачать и установить" Click="OnUpdateInstall" Visibility="Collapsed" />
+                        <Button x:Name="UpdateCancelButton" Content="Отменить" Click="OnUpdateCancel" Visibility="Collapsed" />
+                        <Button Content="Подробности" Click="OnUpdateDetails" />
+                    </WrapPanel>
+                    <TextBlock x:Name="UpdatePhase" TextWrapping="Wrap" Margin="0,4" FontWeight="Bold" />
+
+                    <TextBlock Style="{StaticResource Section}" Text="Локальный прокси" />
                     <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Gray}"
                                Text="Приложение НЕ меняет системный прокси Windows. Укажите адрес в браузере/программе вручную (или через расширение браузера)." />
                     <Grid Margin="0,8,0,0">
@@ -332,16 +342,6 @@
                     </DockPanel>
                     <TextBlock FontWeight="Bold" Margin="0,10,0,4" Text="Персонально заблокированные" />
                     <StackPanel x:Name="BlockedPanel" />
-
-                    <TextBlock Style="{StaticResource Section}" Text="Обновления" />
-                    <TextBlock x:Name="UpdateSummary" TextWrapping="Wrap" Margin="0,4" />
-                    <WrapPanel>
-                        <Button x:Name="UpdateCheckButton" Content="Проверить обновление" Click="OnUpdateCheck" />
-                        <Button x:Name="UpdateInstallButton" Content="Скачать и установить" Click="OnUpdateInstall" Visibility="Collapsed" />
-                        <Button x:Name="UpdateCancelButton" Content="Отменить" Click="OnUpdateCancel" Visibility="Collapsed" />
-                        <Button Content="Подробности" Click="OnUpdateDetails" />
-                    </WrapPanel>
-                    <TextBlock x:Name="UpdatePhase" TextWrapping="Wrap" Margin="0,4" FontWeight="Bold" />
 
                     <TextBlock Style="{StaticResource Section}" Text="Отчёты о сбоях" />
                     <TextBlock x:Name="CrashSummary" TextWrapping="Wrap" />
