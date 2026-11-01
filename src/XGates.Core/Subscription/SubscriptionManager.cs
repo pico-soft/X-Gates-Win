@@ -440,12 +440,13 @@ public static partial class SubscriptionManager
     {
         if (pingByKey.Count == 0) return;
         var ts = now();
-        var file = SubscriptionStore.load(context);
-        var servers = file.servers.Select(rec =>
-            pingByKey.TryGetValue(serverKey(rec.profile), out var ms)
-                ? rec with { profile = rec.profile with { pingMs = ms, lastTestedTs = ts } }
-                : rec).ToList();
-        SubscriptionStore.save(context, file with { servers = servers });
+        SubscriptionStore.update(context, file => file with
+        {
+            servers = file.servers.Select(rec =>
+                pingByKey.TryGetValue(serverKey(rec.profile), out var ms)
+                    ? rec with { profile = rec.profile with { pingMs = ms, lastTestedTs = ts } }
+                    : rec).ToList(),
+        });
     }
 
     /** Обновить speedMbps (ключ→Mbps) в реестре и сохранить ОДИН раз. speedFull НЕ трогаем (легаси/неизвестно). */
@@ -453,16 +454,17 @@ public static partial class SubscriptionManager
     {
         if (speedByKey.Count == 0) return;
         var ts = now();
-        var file = SubscriptionStore.load(context);
-        var servers = file.servers.Select(rec =>
+        SubscriptionStore.update(context, file => file with
         {
-            if (!speedByKey.TryGetValue(serverKey(rec.profile), out var mbps)) return rec;
-            // Провал замера (-1) НЕ затирает прежнюю ВАЛИДНУЮ скорость (Пр.88: не терять данные при массовом
-            // провале temp-инстансов). Обновляем измерение только валидным результатом (≥0) или если раньше данных не было.
-            if (mbps < 0 && (rec.profile.speedMbps ?? -1.0) >= 0.0) return rec;
-            return rec with { profile = rec.profile with { speedMbps = mbps, speedTestedTs = ts } };
-        }).ToList();
-        SubscriptionStore.save(context, file with { servers = servers });
+            servers = file.servers.Select(rec =>
+            {
+                if (!speedByKey.TryGetValue(serverKey(rec.profile), out var mbps)) return rec;
+                // Провал замера (-1) НЕ затирает прежнюю ВАЛИДНУЮ скорость (Пр.88: не терять данные при массовом
+                // провале temp-инстансов). Обновляем измерение только валидным результатом (≥0) или если раньше данных не было.
+                if (mbps < 0 && (rec.profile.speedMbps ?? -1.0) >= 0.0) return rec;
+                return rec with { profile = rec.profile with { speedMbps = mbps, speedTestedTs = ts } };
+            }).ToList(),
+        });
     }
 
     /** Как [applySpeedResults], но с КАЧЕСТВОМ замера: ключ→(Mbps, full). full=true — полный/точный замер,
@@ -471,15 +473,16 @@ public static partial class SubscriptionManager
     {
         if (speedByKey.Count == 0) return;
         var ts = now();
-        var file = SubscriptionStore.load(context);
-        var servers = file.servers.Select(rec =>
+        SubscriptionStore.update(context, file => file with
         {
-            if (!speedByKey.TryGetValue(serverKey(rec.profile), out var pair)) return rec;
-            // Тот же guard: провал (-1) не затирает прежнюю валидную скорость (и её качество).
-            if (pair.mbps < 0 && (rec.profile.speedMbps ?? -1.0) >= 0.0) return rec;
-            return rec with { profile = rec.profile with { speedMbps = pair.mbps, speedTestedTs = ts, speedFull = pair.full } };
-        }).ToList();
-        SubscriptionStore.save(context, file with { servers = servers });
+            servers = file.servers.Select(rec =>
+            {
+                if (!speedByKey.TryGetValue(serverKey(rec.profile), out var pair)) return rec;
+                // Тот же guard: провал (-1) не затирает прежнюю валидную скорость (и её качество).
+                if (pair.mbps < 0 && (rec.profile.speedMbps ?? -1.0) >= 0.0) return rec;
+                return rec with { profile = rec.profile with { speedMbps = pair.mbps, speedTestedTs = ts, speedFull = pair.full } };
+            }).ToList(),
+        });
     }
 
     // ─────────────────────────── управление источниками ───────────────────────────

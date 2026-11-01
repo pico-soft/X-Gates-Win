@@ -46,6 +46,15 @@ public static class SubscriptionStore
         }
     }
 
+    /** Чтение и запись одним шагом: замеры пишут из нескольких потоков, и между load и save чужой результат терялся. */
+    public static void update(Context context, Func<SourcesFile, SourcesFile> change)
+    {
+        lock (Sync)
+        {
+            save(context, change(load(context)));
+        }
+    }
+
     /** Сырое чтение СТАРОГО формата (`subscriptions.json` = список [Subscription] со вложенными
      *  серверами) — только для однократной миграции. Пусто, если файла нет или он не в старой схеме. */
     public static List<Subscription> readLegacy(Context context)
