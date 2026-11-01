@@ -145,6 +145,7 @@ public sealed class FirefoxRealBrowserTests
             var closed = FirefoxSetup.configure(ctx, socks.port);
             log($"кнопка, Firefox закрыт: ok={closed.ok} «{closed.text}»");
             Assert.True(closed.ok, closed.text);
+            Assert.False(closed.restartFirefox, closed.text);
             start($"http://{PROBE}/");
             var viaClosed = await waitFor(reached, WAIT);
             dump("после кнопки при закрытом Firefox", socks);
@@ -159,7 +160,7 @@ public sealed class FirefoxRealBrowserTests
             await waitFor(() => FirefoxSetup.findProfiles().Any(p => FirefoxSetup.profileInUse(p.dir)), WAIT);
             var open = FirefoxSetup.configure(ctx, socks.port);
             log($"кнопка, Firefox открыт: ok={open.ok} «{open.text}»");
-            Assert.Contains("Перезапустите Firefox", open.text);
+            Assert.True(open.restartFirefox, open.text);
             await killAll();
             start($"http://{PROBE}/");
             var viaOpen = await waitFor(reached, WAIT);

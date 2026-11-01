@@ -22,7 +22,14 @@ public static partial class FirefoxSetup
 {
     public sealed record Profile(string dir, string name);
 
-    public sealed record Outcome(bool ok, string text);
+    /// <param name="restartFirefox">Firefox открыт: настройка применится только после его перезапуска.</param>
+    public sealed record Outcome(bool ok, string text, bool restartFirefox = false);
+
+    /// <summary>
+    /// Firefox читает user.js только при запуске. Просьба про перезапуск в строке статуса осталась незамеченной
+    /// (Elyor 2026-11-01), поэтому окно показывает её отдельно.
+    /// </summary>
+    public const string RESTART_TEXT = "Закройте все окна Firefox и откройте его заново: пока он открыт, он работает по-старому.";
 
     /// <summary>Настройки, которыми управляем (порядок — как в блоке).</summary>
     internal static readonly IReadOnlyList<string> MANAGED =
@@ -219,7 +226,7 @@ public static partial class FirefoxSetup
         saveState(ctx, state);
         var names = string.Join(", ", found.Select(p => $"«{p.name}»"));
         return new Outcome(true, $"Firefox настроен на X-Gates (SOCKS5 127.0.0.1:{socksPort}, DNS через прокси), профиль {names}. " +
-            (running ? "Перезапустите Firefox — настройки вступят в силу после перезапуска." : "Откройте Firefox."));
+            (running ? RESTART_TEXT : "Откройте Firefox."), running);
     }
 
     /// <summary>Порт сменили в настройках X-Gates — переписать блок, если Firefox настроен нами.</summary>
@@ -273,11 +280,11 @@ public static partial class FirefoxSetup
         var st = loadState(ctx);
         if (st is { profiles.Count: > 0 })
             return st.port == socksPort
-                ? $"Firefox настроен на X-Gates (SOCKS5 127.0.0.1:{socksPort}). Пока X-Gates не запущен, Firefox сайты не откроет — тогда «Вернуть как было»."
+                ? $"Firefox настроен на X-Gates (SOCKS5 127.0.0.1:{socksPort}), настройка действует после перезапуска Firefox. Пока X-Gates не запущен, Firefox сайты не откроет — тогда «Вернуть как было»."
                 : $"Firefox настроен на старый порт {st.port} — нажмите «Настроить Firefox» ещё раз.";
         var found = findProfiles();
         return found.Count == 0
             ? "Firefox не найден. Установите Firefox и запустите его один раз."
-            : $"Firefox найден (профиль {string.Join(", ", found.Select(p => $"«{p.name}»"))}). Кнопка пропишет прокси X-Gates только в Firefox — системные настройки Windows не меняются.";
+            : $"Firefox найден (профиль {string.Join(", ", found.Select(p => $"«{p.name}»"))}). Кнопка пропишет прокси X-Gates только в Firefox — системные настройки Windows не меняются. Открытый Firefox после этого нужно закрыть и открыть заново.";
     }
 }

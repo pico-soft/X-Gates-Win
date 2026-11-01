@@ -104,13 +104,18 @@ public sealed class FirefoxSetupTests : IDisposable
     public void Restore_refuses_while_firefox_is_open_and_new_userjs_is_removed()
     {
         File.Delete(Path.Combine(profile, "user.js"));
-        Assert.True(FirefoxSetup.configure(ctx, 10815).ok);
+        var closed = FirefoxSetup.configure(ctx, 10815);
+        Assert.True(closed.ok);
+        Assert.False(closed.restartFirefox);                               // закрыт — просто открыть
+        Assert.DoesNotContain(FirefoxSetup.RESTART_TEXT, closed.text);
         Assert.StartsWith(FirefoxSetup.BEGIN, UserJs);
 
         using (new FileStream(Path.Combine(profile, "parent.lock"), FileMode.Create, FileAccess.ReadWrite, FileShare.None))
         {
             Assert.True(FirefoxSetup.profileInUse(profile));
-            Assert.Contains("Перезапустите Firefox", FirefoxSetup.configure(ctx, 10815).text);   // настроить можно и при открытом
+            var open = FirefoxSetup.configure(ctx, 10815);                  // настроить можно и при открытом
+            Assert.True(open.restartFirefox);
+            Assert.Contains(FirefoxSetup.RESTART_TEXT, open.text);
             var r = FirefoxSetup.restore(ctx);
             Assert.False(r.ok);
             Assert.Contains("Закройте Firefox", r.text);

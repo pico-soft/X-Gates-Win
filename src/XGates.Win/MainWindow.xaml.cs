@@ -578,7 +578,7 @@ public partial class MainWindow : Window
     /// <summary>Инструкции (текст можно выделить и скопировать). Порты — текущие.</summary>
     private static string howTo(int socks, int http) =>
         $"""
-        Firefox: проще всего — кнопка «Настроить Firefox» выше (и «Вернуть как было», чтобы снять).
+        Firefox: проще всего — кнопка «Настроить Firefox» выше, затем закройте Firefox и откройте заново («Вернуть как было» — чтобы снять).
           Вручную: Настройки → Основные → Параметры сети → «Настроить…» → «Ручная настройка прокси»:
           узел SOCKS 127.0.0.1, порт {socks}, SOCKS 5, ☑ «Отправлять DNS-запросы через прокси при использовании SOCKS 5».
           Остальные поля пустые. Проверка: откройте 2ip.ru — адрес и страна должны быть зарубежными.
@@ -721,6 +721,8 @@ public partial class MainWindow : Window
         catch (Exception ex) { r = new FirefoxSetup.Outcome(false, $"Не получилось: {ex.Message}"); }
         FirefoxStatus.Text = r.text;
         FirefoxStatus.Foreground = r.ok ? Brushes.DarkGreen : Brushes.Firebrick;
+        if (r.restartFirefox)
+            MessageBox.Show(this, FirefoxSetup.RESTART_TEXT, "Перезапустите Firefox", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void OnCopySocks(object sender, RoutedEventArgs e) => copy($"127.0.0.1:{WinSettingsStore.current().socksPort}");
