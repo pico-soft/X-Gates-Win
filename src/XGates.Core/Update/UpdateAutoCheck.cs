@@ -12,6 +12,8 @@ public static class UpdateAutoCheck
 {
     /// <summary>Сколько ждать подъёма своего SOCKS на холодном старте (подменяется в тестах).</summary>
     internal static int proxyWaitMs = UpdateChecker.AUTO_CHECK_PROXY_WAIT_MS;
+    /// <summary>Тест запуска программы не должен ходить в настоящий GitHub (подменяется в тестах).</summary>
+    internal static bool skipOnLaunch;
 
     /**
      * Холодный старт (ТЗ Elyor 2026-11-01: запустил программу — сразу видишь, что вышло обновление): при КАЖДОМ запуске,
@@ -22,6 +24,7 @@ public static class UpdateAutoCheck
     public static Thread coldStart(Context context)
     {
         var app = context.applicationContext;
+        if (skipOnLaunch) return KThread.start(() => { }, "update-cold-start");
         return KThread.start(() =>
         {
             if (tryCheck(app)) return;

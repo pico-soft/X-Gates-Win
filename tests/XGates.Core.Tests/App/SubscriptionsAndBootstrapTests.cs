@@ -168,6 +168,7 @@ public sealed class SubscriptionsAndBootstrapTests : IDisposable
             File.WriteAllText(Path.Combine(Directory.CreateDirectory(dir).FullName, "win_settings.json"), "{\"socksPort\":21000,\"httpPort\":21001}");
             Directory.CreateDirectory(Path.Combine(dir, "updates"));
             File.WriteAllText(Path.Combine(dir, "updates", "XGatesWin-0.0-win-x64.msi"), "старый установщик");
+            UpdateAutoCheck.skipOnLaunch = true;
             var c = AppBootstrap.start(dir);
             Assert.Equal(dir, c.filesDir);
             Assert.Equal(21000, XGates.Core.Xray.XrayConfig.SOCKS_PORT);   // WinSettingsStore загружен
@@ -178,6 +179,7 @@ public sealed class SubscriptionsAndBootstrapTests : IDisposable
         }
         finally
         {
+            UpdateAutoCheck.skipOnLaunch = false;
             Log.Sink = savedSink;
             WinSettingsStore.resetForTest();
             KThread.onUncaught = null;
