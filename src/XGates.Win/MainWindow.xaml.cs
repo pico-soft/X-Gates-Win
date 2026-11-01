@@ -142,6 +142,7 @@ public partial class MainWindow : Window
         AddSubscriptionHint.Visibility = V(s.sourcesEmpty);
 
         // Цвет плашки — правило Elyor (StatusBox Kotlin): выкл серый; обрыв тёмно-красный; не подтверждено серый; по скорости.
+        // 1–5 Мбит/с на Windows оливковые, а не сине-серые (Elyor 2026-11-01): туннель работает, серый читался как «что-то не так».
         var liveFresh = (st.tunnelDownMbps ?? 0.0) > 0.0 && st.liveMeasuredAtMs > 0 && JavaSystem.currentTimeMillis() - st.liveMeasuredAtMs <= MainScreenModel.HEALTH_FRESH_MS;
         var colorSpeed = Math.Max(liveFresh ? st.tunnelDownMbps ?? 0.0 : 0.0, st.speedMbps ?? 0.0);
         (uint bg, uint fg) =
@@ -150,7 +151,7 @@ public partial class MainWindow : Window
             !st.verified ? (0xFF5C5C5Cu, 0xFFE8E8E8u) :
             colorSpeed > 0.0
                 ? colorSpeed > 5.0 ? (0xFF1B5E20u, 0xFFA5D6A7u)
-                : colorSpeed >= 1.0 ? (0xFF37474Fu, 0xFFB0BEC5u)
+                : colorSpeed >= 1.0 ? (0xFF465222u, 0xFFD9E2B0u)
                 : colorSpeed >= 0.2 ? (0xFF5D4037u, 0xFFD7CCC8u)
                 : (0xFF5D2A2Au, 0xFFEF9A9Au)
             : (0xFF1B5E20u, 0xFFA5D6A7u);
