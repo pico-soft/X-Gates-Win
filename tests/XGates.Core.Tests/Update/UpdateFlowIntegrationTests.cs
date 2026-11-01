@@ -325,31 +325,31 @@ public sealed class UpdateFlowIntegrationTests : IDisposable
     }
 
     [Fact]
-    public void Cold_start_check_waits_for_own_proxy_and_stays_silent_without_it()
+    public void Cold_start_checks_at_every_launch_without_tunnel()
     {
         Publish("v0.7", code: 7);
         UpdateAutoCheck.proxyWaitMs = 0;
 
-        // Своего SOCKS нет → молча выходим, ничего не записав (ручная кнопка объяснит).
-        Assert.True(UpdateAutoCheck.coldStart(ctx)!.Join(10_000));
-        Assert.Equal(0, UpdateStore.record.value.checkedAtMs);
+        // Своего SOCKS нет, а полоса всё равно появляется при запуске.
+        Assert.True(UpdateAutoCheck.coldStart(ctx).Join(30_000));
+        Assert.Equal((7, "0.7 beta"), UpdateStore.bannerVersion(notifyOn: true));
+        var first = UpdateStore.record.value.checkedAtMs;
+        Assert.NotEqual(0, first);
 
-        // «Свой SOCKS» слушает (заглушка рвёт соединения — каскад переходит на прямую ступень) → проверка записана.
-        using var fake = new TcpListener(IPAddress.Loopback, 0);
-        fake.Start();
-        var port = ((IPEndPoint)fake.LocalEndpoint).Port;
-        var stop = false;
-        var acceptor = new Thread(() => { while (!stop) { try { fake.AcceptTcpClient().Dispose(); } catch (Exception) { return; } } }) { IsBackground = true };
-        acceptor.Start();
-        CascadeFetch.ownSocksPort = () => port;
-        try
-        {
-            Assert.True(UpdateAutoCheck.coldStart(ctx)!.Join(30_000));
-            Assert.NotEqual(0, UpdateStore.record.value.checkedAtMs);
-            Assert.Equal((7, "0.7 beta"), UpdateStore.bannerVersion(notifyOn: true));
-            Assert.Null(UpdateAutoCheck.coldStart(ctx));   // сутки не прошли — потока нет
-        }
-        finally { stop = true; fake.Stop(); }
+        // Следующий запуск в тот же день проверяет снова: сутки больше не ждём.
+        Thread.Sleep(5);
+        Assert.True(UpdateAutoCheck.coldStart(ctx).Join(30_000));
+        Assert.True(UpdateStore.record.value.checkedAtMs > first);
+    }
+
+    [Fact]
+    public void Cold_start_failure_stays_silent()
+    {
+        UpdateChecker.REPOS = [new UpdateChecker.Repo(Owner, RepoName, web: "http://127.0.0.1:1", api: "http://127.0.0.1:1")];
+        UpdateAutoCheck.proxyWaitMs = 0;
+
+        Assert.True(UpdateAutoCheck.coldStart(ctx).Join(30_000));
+        Assert.Equal(0, UpdateStore.record.value.checkedAtMs);   // ошибку на старте не показываем и не запоминаем
     }
 
     private sealed class RecordingSink : NotificationHelper.INotificationSink

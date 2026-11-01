@@ -14,20 +14,20 @@ public static class UpdateAutoCheck
     internal static int proxyWaitMs = UpdateChecker.AUTO_CHECK_PROXY_WAIT_MS;
 
     /**
-     * Холодный старт: не чаще раза в сутки, ВСЁ в фоновом потоке (окно открывается сразу). Ждём подъёма своего SOCKS
-     * не дольше [proxyWaitMs] (без туннеля на заблокированной сети проверка обречена); туннель так и не поднялся —
-     * МОЛЧА выходим, ничего не записывая (ручная кнопка объяснит честно). null — проверка не нужна (рано).
+     * Холодный старт (ТЗ Elyor 2026-11-01: запустил программу — сразу видишь, что вышло обновление): при КАЖДОМ запуске,
+     * в фоновом потоке (окно открывается сразу). Сначала без туннеля: на Android проверка ждала свой SOCKS, и здесь она
+     * молча пропадала, пока подбор сервера не поднимал связь. Не вышло — ждём свой SOCKS не дольше [proxyWaitMs] и
+     * пробуем через него. Снова неудача — молчим, ничего не записывая (ручная кнопка объяснит честно).
      */
-    public static Thread? coldStart(Context context)
+    public static Thread coldStart(Context context)
     {
         var app = context.applicationContext;
-        if (!UpdateStore.dueForAutoCheck(JavaSystem.currentTimeMillis())) return null;
         return KThread.start(() =>
         {
+            if (tryCheck(app)) return;
             var waited = 0;
             while (waited < proxyWaitMs && !CascadeFetch.isOwnProxyUp()) { Thread.Sleep(1_000); waited += 1_000; }
-            if (!CascadeFetch.isOwnProxyUp()) return;   // туннеля нет — молчим
-            checkAndNotify(app);
+            if (CascadeFetch.isOwnProxyUp()) tryCheck(app);
         }, "update-cold-start");
     }
 
@@ -40,6 +40,17 @@ public static class UpdateAutoCheck
         if (!proxyRunning) return false;
         if (!UpdateStore.dueForAutoCheck(JavaSystem.currentTimeMillis())) return false;
         return checkAndNotify(app);
+    }
+
+    /// <summary>Как [checkAndNotify], но ошибку не записывает: при запуске о ней молчим. true — ответ получен.</summary>
+    private static bool tryCheck(Context app)
+    {
+        CheckReport r;
+        try { r = UpdateChecker.check(app); } catch (Exception) { return false; }
+        if (r.result is UpdateCheckResult.Error) return false;
+        UpdateStore.apply(app, r, JavaSystem.currentTimeMillis());
+        UpdateNotifier.maybeNotify(app);
+        return true;
     }
 
     private static bool checkAndNotify(Context app)
