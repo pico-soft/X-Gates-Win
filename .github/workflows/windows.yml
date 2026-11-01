@@ -41,6 +41,13 @@ jobs:
       - name: Тесты (на Windows — Job Object, привязка портов, xray.exe)
         run: dotnet test tests/XGates.Core.Tests -c Release --blame-hang-timeout 5m --logger "trx;LogFileName=tests.trx" --logger "console;verbosity=normal" --results-directory out/tests
 
+      - name: Кнопка «Настроить Firefox» на настоящем Firefox раннера
+        if: always()
+        env:
+          XGATES_FIREFOX_E2E: '1'
+          XGATES_FIREFOX_OUT: ${{ github.workspace }}\out\firefox
+        run: dotnet test tests/XGates.Core.Tests -c Release --filter "FullyQualifiedName~FirefoxRealBrowserTests" --logger "console;verbosity=normal"
+
       - name: Сборка приложения (self-contained win-x64)
         if: always()
         run: dotnet publish src/XGates.Win -c Release -r win-x64 --self-contained -o out/publish/XGatesWin
@@ -151,4 +158,5 @@ jobs:
           path: |
             out/smoke
             out/tests
+            out/firefox
             out/msi
