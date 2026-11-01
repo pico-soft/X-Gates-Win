@@ -121,6 +121,31 @@ public sealed class ServiceAndFullTestIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void Race_winner_is_measured_even_if_core_starts_slowly()
+    {
+        // На Windows ядро поднимается дольше: serverKey уже назначен, а прокси ещё не running.
+        var servers = ImportServers(net.StartVlessServer());
+        XrayProxyService.beforeCoreUpForTest = _ => Thread.Sleep(2_500);
+        FullTestRunner.Result? result = null;
+        var speeds = new List<double>();
+        using var fin = new ManualResetEventSlim();
+        try
+        {
+            FullTestRunner.run(ctx, servers,
+                onPhase: _ => { },
+                connect: p => XrayProxyService.start(ctx, XrayConfigBuilder.build(p), ServerLabels.full(p), SubscriptionManager.serverKey(p)),
+                onDone: r => { result = r; fin.Set(); },
+                onSpeedResult: (_, mbps, _) => { lock (speeds) speeds.Add(mbps); });
+            Assert.True(fin.Wait(90_000), "полный тест не завершился");
+        }
+        finally { XrayProxyService.beforeCoreUpForTest = null; }
+        Assert.NotNull(result!.connected);
+        Assert.Contains(speeds, v => v > 0);
+        XrayProxyService.stop(ctx);
+        Assert.True(WaitUntil(() => !PortOpen(10815), 10_000));
+    }
+
+    [Fact]
     public void Stuck_speed_probe_is_cut_off_and_plate_stops_saying_measuring()
     {
         var p = ImportServers(net.StartVlessServer())[0];

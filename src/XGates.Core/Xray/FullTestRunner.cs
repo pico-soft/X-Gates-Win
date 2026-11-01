@@ -91,6 +91,16 @@ public static class FullTestRunner
         string label(ServerProfile p) => p.remarks.IfBlank(p.address);
         string fmt(double v) => $"{(v * 10).roundToInt() / 10.0}";
 
+        // Связь нужна сейчас: гонка принимает откликнувшихся прямо во время пинга.
+        var raceSettings = SettingsStore.current();
+        var race = !FirstAliveRace.tunnelNeeded() ? null : new FirstAliveRace(appCtx, p =>
+        {
+            if (Volatile.Read(ref cancelled)) return;
+            onPhase($"Подключено: {label(p)}. Ищу быстрее…");
+            MonitorLog.@switch(appCtx, ServerLabels.displayForKey(appCtx, ProxyState.state.value.serverKey), ServerLabels.display(p), "полный тест: первый живой");
+            connect(p);
+        });
+
         // --- Этап 2: speed + early-connect, ПОСЛЕДОВАТЕЛЬНО (обычный режим — мерим всех живых) ---
         void startSpeedPhase(List<ServerProfile> aliveByPing)
         {
@@ -176,8 +186,9 @@ public static class FullTestRunner
                     // ДО общего перебора. Плашка сразу показывает реальную ↓/↑ активного сервера. Промпт 103: замер идёт
                     // на ОТДЕЛЬНОМ потоке с потолком времени — он может длиться ~2 мин на провалах отдачи, и раньше это
                     // «подвешивало» бар на 0/N без обратной связи.
-                    var activeServerKey = ProxyState.state.value.serverKey;
-                    if (ProxyState.state.value.running && activeServerKey != null)
+                    // serverKey назначается раньше, чем поднимется ядро: только running значит, что этот сервер есть что мерить.
+                    var activeServerKey = ProxyState.state.value.running ? ProxyState.state.value.serverKey : null;
+                    if (activeServerKey != null)
                     {
                         onPhase("Проверяю текущий сервер…");
                         beat();
@@ -302,19 +313,9 @@ public static class FullTestRunner
                     Log.w("FullTestRunner", "тест прервался", e);
                     try { onPhase("Проверка прервалась из-за ошибки"); } catch (Exception) { }
                 }
-                finishOnce(new Result(connected ?? best, best, bestSpeed, candidates.Count, Volatile.Read(ref cancelled)));
+                finishOnce(new Result(connected ?? best ?? race?.winner, best, bestSpeed, candidates.Count, Volatile.Read(ref cancelled)));
             }, "fulltest-speed");
         }
-
-        // Связь нужна сейчас: гонка принимает откликнувшихся прямо во время пинга.
-        var raceSettings = SettingsStore.current();
-        var race = !FirstAliveRace.tunnelNeeded() ? null : new FirstAliveRace(appCtx, p =>
-        {
-            if (Volatile.Read(ref cancelled)) return;
-            onPhase($"Подключено: {label(p)}. Ищу быстрее…");
-            MonitorLog.@switch(appCtx, ServerLabels.displayForKey(appCtx, ProxyState.state.value.serverKey), ServerLabels.display(p), "полный тест: первый живой");
-            connect(p);
-        });
 
         // --- Этап 1: ping всех (кроме заблокированных) — нужен для ранжирования, дёшев ---
         onPhase("Проверяю серверы…");
@@ -362,7 +363,8 @@ public static class FullTestRunner
                         if (race.winner is { } won)
                         {
                             var end = JavaSystem.currentTimeMillis() + RACE_CONNECT_WAIT_MS;
-                            while (ProxyState.state.value.serverKey != key(won) && JavaSystem.currentTimeMillis() < end && !Volatile.Read(ref cancelled))
+                            while (!(ProxyState.state.value.running && ProxyState.state.value.serverKey == key(won)) &&
+                                   JavaSystem.currentTimeMillis() < end && !Volatile.Read(ref cancelled))
                                 Thread.Sleep(200);
                         }
                         startSpeedPhase(alive);
