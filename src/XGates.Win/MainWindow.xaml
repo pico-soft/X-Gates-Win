@@ -64,6 +64,8 @@
                             <StackPanel>
                                 <TextBlock Foreground="White" FontWeight="Bold" Text="Доступна новая версия" />
                                 <TextBlock x:Name="UpdateBannerText" Foreground="#BBDEFB" TextWrapping="Wrap" Text="Нажмите, чтобы обновить" />
+                                <ProgressBar x:Name="UpdateBannerBar" Height="3" Maximum="1" Margin="0,6,0,0" Visibility="Collapsed"
+                                             Foreground="White" Background="#33FFFFFF" BorderThickness="0" />
                             </StackPanel>
                         </DockPanel>
                     </Border>
@@ -227,6 +229,7 @@
                         <Button x:Name="UpdateCancelButton" Content="Отменить" Click="OnUpdateCancel" Visibility="Collapsed" />
                         <Button Content="Подробности" Click="OnUpdateDetails" />
                     </WrapPanel>
+                    <ProgressBar x:Name="UpdateBar" Height="3" Maximum="1" Margin="0,8,0,0" Visibility="Collapsed" />
                     <TextBlock x:Name="UpdatePhase" TextWrapping="Wrap" Margin="0,4" FontWeight="Bold" />
 
                     <TextBlock Style="{StaticResource Section}" Text="Локальный прокси" />

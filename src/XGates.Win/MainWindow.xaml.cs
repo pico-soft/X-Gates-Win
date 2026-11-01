@@ -129,6 +129,7 @@ public partial class MainWindow : Window
         }
         CrashBanner.Visibility = V(s.showCrashBanner);
         UpdateBanner.Visibility = V(s.updateBanner != null);
+        showUpdateBar(UpdateBannerBar);
         UpdateBannerText.Text = UpdateFlowController.phase.value switch
         {
             UpdateFlowController.Phase.Checking => "Проверяю обновление…",
@@ -635,6 +636,14 @@ public partial class MainWindow : Window
         NewWord.Text = "";
     }
 
+    private static void showUpdateBar(ProgressBar bar)
+    {
+        var b = UpdateProgress.of(UpdateFlowController.phase.value);
+        bar.Visibility = V(b.visible);
+        bar.IsIndeterminate = b.indeterminate;
+        bar.Value = b.fraction;
+    }
+
     private void renderSettingsLive()
     {
         var rec = UpdateStore.record.value;
@@ -644,6 +653,7 @@ public partial class MainWindow : Window
         var downloading = UpdateFlowController.phase.value is UpdateFlowController.Phase.Downloading;
         UpdateInstallButton.Visibility = V(UpdateStore.live.value is UpdateCheckResult.Available && !downloading);
         UpdateCancelButton.Visibility = V(downloading);
+        showUpdateBar(UpdateBar);
         UpdatePhase.Text = UpdateFlowController.phase.value switch
         {
             UpdateFlowController.Phase.Checking => "Проверяю обновление…",
