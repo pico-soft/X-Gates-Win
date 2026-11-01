@@ -1,0 +1,162 @@
+# Проверка на настоящей Windows (у разработки — Linux-сервер; ноутбук Elyor подключится позже).
+# ТОЛЬКО по явному действию: ручной запуск (workflow_dispatch) или push в служебную ветку ci-check (проверка
+# несведённой работы до коммита в main). На каждый push в main не гоняем.
+# Ничего не публикует: установщик, отчёт тестов и скриншоты — артефакты прогона, хранятся 7 дней. Репозиторий
+# публичный → скачать их может любой вошедший в GitHub; выпуск (тег, релиз) — только по слову Elyor.
+# На раннере НЕ подключаемся к реальным серверам (автоподключение выключено заранее) — только окно, тесты, MSI.
+name: windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci-check]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Ядро xray (закреплённая версия, сверка sha256 из tools/xray/fetch-xray.sh)
+        shell: pwsh
+        run: |
+          $s = Get-Content tools/xray/fetch-xray.sh -Raw
+          $ver = [regex]::Match($s, 'VERSION="([^"]+)"').Groups[1].Value
+          $sha = [regex]::Match($s, '\[windows-64\]="([0-9a-f]+)"').Groups[1].Value
+          $zip = Join-Path $env:RUNNER_TEMP 'xray.zip'
+          Invoke-WebRequest "https://github.com/XTLS/Xray-core/releases/download/$ver/Xray-windows-64.zip" -OutFile $zip
+          $got = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($got -ne $sha) { throw "sha256 НЕ совпал: $got (ожидался $sha)" }
+          Expand-Archive $zip third_party/xray/windows-64 -Force
+          Write-Host "xray $ver ok"
+
+      - name: Тесты (на Windows — Job Object, привязка портов, xray.exe)
+        run: dotnet test tests/XGates.Core.Tests -c Release --blame-hang-timeout 5m --logger "trx;LogFileName=tests.trx" --logger "console;verbosity=normal" --results-directory out/tests
+
+      - name: Кнопка «Настроить Firefox» на настоящем Firefox раннера
+        if: always()
+        env:
+          XGATES_FIREFOX_E2E: '1'
+          XGATES_FIREFOX_OUT: ${{ github.workspace }}\out\firefox
+        run: dotnet test tests/XGates.Core.Tests -c Release --filter "FullyQualifiedName~FirefoxRealBrowserTests" --logger "console;verbosity=normal"
+
+      - name: Сборка приложения (self-contained win-x64)
+        if: always()
+        run: dotnet publish src/XGates.Win -c Release -r win-x64 --self-contained -o out/publish/XGatesWin
+
+      - name: Запуск окна, трей, один экземпляр, скриншоты
+        if: always()
+        # Windows PowerShell 5.1: UIAutomationClient из .NET Framework — без сюрпризов pwsh 7. 5.1 читает файл шага в
+        # кодировке ANSI (UTF-8 без BOM ломает кириллицу: «т» → U+201A = кавычка → ParserError, прогон 2026-10-31) —
+        # поэтому скрипт ниже только ASCII.
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force out/smoke | Out-Null
+          # Turn auto-connect off BEFORE launch: no real servers on the runner.
+          $data = Join-Path $env:LOCALAPPDATA 'X-Gates'
+          New-Item -ItemType Directory -Force $data | Out-Null
+          [IO.File]::WriteAllText((Join-Path $data 'settings.json'), '{"autoStartOnLaunch":false}', (New-Object System.Text.UTF8Encoding $false))
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing, UIAutomationClient, UIAutomationTypes
+          function Shot($name) {
+            $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+            $bmp.Save((Join-Path 'out/smoke' "$name.png")); $g.Dispose(); $bmp.Dispose()
+          }
+          $AE = [System.Windows.Automation.AutomationElement]
+          function FindWindow($procId, $timeoutSec) {
+            $cond = New-Object System.Windows.Automation.PropertyCondition($AE::ProcessIdProperty, $procId)
+            for ($i = 0; $i -lt $timeoutSec * 2; $i++) {
+              $w = $AE::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Children, $cond)
+              if ($w) { return $w }
+              Start-Sleep -Milliseconds 500
+            }
+            return $null
+          }
+          $exe = (Resolve-Path out/publish/XGatesWin/XGatesWin.exe).Path
+          $p = Start-Process $exe -PassThru
+          $w = FindWindow $p.Id 40
+          if (-not $w) { Shot 'no-window'; throw 'window did not appear within 40 s' }
+          Write-Host "window: '$($w.Current.Name)'"
+          Start-Sleep 4; Shot '1-main'
+          $tabCond = New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::TabItem)
+          $tabs = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, $tabCond)
+          Write-Host "tabs: $($tabs.Count)"
+          $n = 2
+          foreach ($t in $tabs) {
+            $t.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+            Start-Sleep 2; Shot "$n-tab-$($t.Current.Name.Trim())"; $n++
+          }
+          # Closing the window = to tray: process alive, no window.
+          $w.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
+          Start-Sleep 3
+          if ($p.HasExited) { throw 'process exited after window close (expected tray)' }
+          Shot "$n-closed-to-tray"; $n++
+          # Second launch: the first copy shows its window, the new one exits.
+          $p2 = Start-Process $exe -PassThru
+          if (-not $p2.WaitForExit(15000)) { throw 'second instance did not exit' }
+          $w = FindWindow $p.Id 15
+          if (-not $w) { throw 'first instance did not show window on second launch' }
+          Start-Sleep 2; Shot "$n-reopened"
+          Write-Host "XGatesWin processes: $((Get-Process XGatesWin -ErrorAction SilentlyContinue).Count)"
+          Stop-Process -Id $p.Id -Force
+          Copy-Item (Join-Path $data 'logs/x-gates.log') out/smoke/ -ErrorAction SilentlyContinue
+
+      - name: Установщик MSI (WiX v5, на пользователя) — сборка, установка, удаление
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ver = [regex]::Match((Get-Content Directory.Build.props -Raw), '<Version>([^<]+)</Version>').Groups[1].Value
+          dotnet tool install --global wix --version 5.0.2
+          $wix = Join-Path $env:USERPROFILE '.dotnet\tools\wix.exe'   # PATH к инструментам dotnet в этом шаге может не обновиться
+          New-Item -ItemType Directory -Force out/msi | Out-Null
+          $msi = "out/msi/XGatesWin-$ver-win-x64.msi"
+          # Пути — абсолютные: относительный bindpath для <Files Include> WiX считает от папки .wxs (installer/) →
+          # в прогоне 2026-10-31 MSI вышел пустым (98 КБ, предупреждение WIX8601) и ничего не установил.
+          $pub = (Resolve-Path out/publish/XGatesWin).Path
+          $ico = (Resolve-Path src/XGates.Win/Assets/app.ico).Path
+          & $wix build installer/XGatesWin.wxs -arch x64 -bindpath "publish=$pub" -d Version=$ver -d "IconPath=$ico" -o $msi
+          if ($LASTEXITCODE -ne 0) { throw "wix build: $LASTEXITCODE" }
+          $size = (Get-Item $msi).Length
+          Write-Host "MSI: $([math]::Round($size / 1MB, 1)) МБ"
+          if ($size -lt 20MB) { throw "MSI подозрительно мал ($size байт) — файлы программы не попали" }
+          # В v5 build не гоняет ICE — отдельно; ICE105 — правило для пакетов «на пользователя или на машину».
+          & $wix msi validate $msi -ice ICE105
+          if ($LASTEXITCODE -ne 0) { Write-Warning "wix msi validate: $LASTEXITCODE" }
+          $msi = (Resolve-Path $msi).Path
+          $r = Start-Process msiexec -ArgumentList "/i `"$msi`" /qn /l*v out\msi\install.log" -Wait -PassThru
+          if ($r.ExitCode -notin 0, 3010) { throw "msiexec /i: код $($r.ExitCode) (см. out\msi\install.log)" }
+          $installed = Join-Path $env:LOCALAPPDATA 'Programs\X-Gates Win\XGatesWin.exe'
+          if (-not (Test-Path $installed)) {
+            Get-ChildItem 'C:\Program Files\X-Gates Win' -ErrorAction SilentlyContinue | Select-Object -First 3
+            throw "не установлено на пользователя: нет $installed"
+          }
+          Write-Host "установлено: $installed"
+          if (-not (Test-Path (Join-Path $env:LOCALAPPDATA 'Programs\X-Gates Win\xray\xray.exe'))) { throw 'нет xray\xray.exe' }
+          if (Test-Path (Join-Path $env:LOCALAPPDATA 'Programs\X-Gates Win\xray\wintun.dll')) { throw 'wintun.dll попал в установку' }
+          $r = Start-Process msiexec -ArgumentList "/x `"$msi`" /qn /l*v out\msi\uninstall.log" -Wait -PassThru
+          if ($r.ExitCode -notin 0, 3010) { throw "msiexec /x: код $($r.ExitCode)" }
+          if (Test-Path $installed) { throw 'после удаления файл остался' }
+          Write-Host 'удалено чисто'
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-check
+          retention-days: 7
+          path: |
+            out/smoke
+            out/tests
+            out/firefox
+            out/msi
