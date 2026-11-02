@@ -224,7 +224,7 @@ public sealed class MainScreenModelTests : IDisposable
         LastServerStore.save(ctx, SubscriptionManager.serverKey(last));
 
         model!.autoStart();
-        Assert.True(WaitUntil(() => ProxyState.state.value.serverKey == SubscriptionManager.serverKey(last), 10_000), "последний сервер не поднят сразу");
+        Assert.True(WaitUntil(() => ProxyState.state.value.serverKey == SubscriptionManager.serverKey(last), 10_000), $"последний сервер не поднят сразу: {ProxyState.state.value.message}");
         Assert.Contains(MonitorLog.state.value, e => (e.text + e.detail).Contains("автозапуск (последний сервер)"));
         Assert.True(WaitUntil(() => Snap().fullTesting || TestProgress.state.value.phase == "Готово", 15_000), "после мгновенной связи не пошёл полный тест");
         Assert.True(WaitTestDone(), TestProgress.state.value.phase);

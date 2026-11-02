@@ -57,11 +57,26 @@ public sealed class LocalTestNet : IDisposable
         _ = Task.Run(AcceptLoop);
     }
 
+    private static int nextFreePort = 20_000 + Random.Shared.Next(10_000);
+
+    /// <summary>
+    /// Порт вне диапазона исходящих соединений и без повторов. Системный порт (bind 0) приходится отпускать до запуска xray, и на
+    /// Windows его успевало занять исходящее соединение: «bind: Only one usage of each socket address», прогон 41351026626.
+    /// </summary>
     public static int FreePort()
     {
-        var l = new TcpListener(IPAddress.Loopback, 0);
-        l.Start();
-        try { return ((IPEndPoint)l.LocalEndpoint).Port; } finally { l.Stop(); }
+        while (true)
+        {
+            var port = Interlocked.Increment(ref nextFreePort);
+            try
+            {
+                var l = new TcpListener(IPAddress.Loopback, port);
+                l.Start();
+                l.Stop();
+                return port;
+            }
+            catch (SocketException) { /* занят или зарезервирован системой — следующий */ }
+        }
     }
 
     /// <summary>Поднять «удалённый» vless-сервер (tcp или ws) на петле; вернуть его порт.</summary>
