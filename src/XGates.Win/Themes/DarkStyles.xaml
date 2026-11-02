@@ -1,11 +1,14 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <!-- Тёмные варианты только тех элементов, у которых цвета зашиты в стандартное оформление Windows: кнопка, вкладка, полоса прокрутки. Остальное перекрашивает Dark.xaml. -->
+    <!-- Тёмные варианты только тех элементов, у которых цвета зашиты в стандартное оформление Windows: кнопка, вкладка, подсказка, полоса прокрутки. Остальное перекрашивает Dark.xaml. -->
     <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="Styles.xaml" />
     </ResourceDictionary.MergedDictionaries>
 
-    <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+    <!-- Поля повторены из Styles.xaml намеренно: BasedOn по своему же ключу находит стиль Windows, а не наш, и кнопки слипаются (прогон 41527147817). -->
+    <Style TargetType="Button">
+        <Setter Property="Padding" Value="12,5" />
+        <Setter Property="Margin" Value="0,0,8,0" />
         <Setter Property="Foreground" Value="{DynamicResource Text}" />
         <Setter Property="Background" Value="#35373B" />
         <Setter Property="BorderBrush" Value="#55FFFFFF" />
@@ -67,6 +70,12 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+
+    <Style TargetType="ToolTip">
+        <Setter Property="Background" Value="#2B2D31" />
+        <Setter Property="Foreground" Value="{DynamicResource Text}" />
+        <Setter Property="BorderBrush" Value="#55FFFFFF" />
     </Style>
 
     <Style TargetType="ProgressBar">

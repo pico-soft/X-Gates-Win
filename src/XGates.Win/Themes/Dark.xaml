@@ -21,11 +21,9 @@
     <SolidColorBrush x:Key="SpeedMid" Color="#FFA726" />
     <SolidColorBrush x:Key="SpeedGood" Color="#66BB6A" />
 
-    <!-- Стандартное оформление Windows берёт фон и текст из системных цветов: подмена здесь перекрашивает диалоги, поля ввода, подсказки и списки только в нашем приложении. -->
+    <!-- Стандартное оформление Windows берёт фон и текст из системных цветов: подмена здесь перекрашивает диалоги, поля ввода и списки только в нашем приложении. -->
     <SolidColorBrush x:Key="{x:Static SystemColors.WindowBrushKey}" Color="#1E1F22" />
     <SolidColorBrush x:Key="{x:Static SystemColors.WindowTextBrushKey}" Color="#E6E6E6" />
     <SolidColorBrush x:Key="{x:Static SystemColors.ControlTextBrushKey}" Color="#E6E6E6" />
     <SolidColorBrush x:Key="{x:Static SystemColors.GrayTextBrushKey}" Color="#8A8A8A" />
-    <SolidColorBrush x:Key="{x:Static SystemColors.InfoBrushKey}" Color="#2B2D31" />
-    <SolidColorBrush x:Key="{x:Static SystemColors.InfoTextBrushKey}" Color="#E6E6E6" />
 </ResourceDictionary>
