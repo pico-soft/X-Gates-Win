@@ -207,13 +207,14 @@ public sealed class OutageRecoveryTests : IDisposable
         var active = servers.First(it => it.remarks == "srv0");
         Start(active);
 
-        // Что мерил монитор: тест падает на Windows примерно в двух прогонах из пяти, и без этого причину не увидеть.
+        // Текущий задан числом: короткий замер живого сервера на стенде Windows иногда даёт -1, и тогда монитор справедливо пропускает проход
+        // (прогон 41455944519: srv0=-1, повторный ok). Кандидаты мерятся по-настоящему: мёртвый порт здесь и проверяется.
         var measured = new System.Collections.Concurrent.ConcurrentQueue<string>();
         var saved = NetworkMonitor.measureEnough;
         NetworkMonitor.measureEnough = (c, p, t) =>
         {
-            var m = saved(c, p, t);
-            measured.Enqueue(m > 0.0 ? $"{p.remarks}={m}" : $"{p.remarks}={m} ({ServerSpeedTester.measureSpeedDetailed(c, p).reason})");
+            var m = p.remarks == "srv0" ? 5.0 : saved(c, p, t);
+            measured.Enqueue($"{p.remarks}={m}");
             return m;
         };
         try { NetworkMonitor.optimizeToFastest(ctx, SettingsStore.current()).Wait(); }
