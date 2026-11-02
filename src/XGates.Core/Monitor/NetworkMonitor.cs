@@ -1678,10 +1678,12 @@ public static class NetworkMonitor
             // Пр.127.C: деградация по УЖЕ идущему трафику (бесплатно). Только при СУЩЕСТВЕННОМ трафике — иначе
             // низкая скорость = «мало качали», а не медленный туннель. Тишину (иначе — ниже порога байт) НЕ трактуем.
             if (dRx + dTx >= DEGRADATION_MIN_TRAFFIC_BYTES) await maybeStepFromDegraded(app, cur, curKey, down);
-            return lastActiveProbeMs;
+            // Замера этого сервера ещё нет: одна проба и при трафике, иначе при постоянной работе браузера строка «Туннель» осталась бы пустой.
+            var known = TunnelSpeed.snapshot();
+            if (known.serverKey == curKey && known.measuredAtMs > 0L) return lastActiveProbeMs;
         }
+        else TunnelSpeed.clearFlow(curKey);
 
-        TunnelSpeed.clearFlow(curKey);
         // (2) Простой: активная проба — только если пришло время И экран включён (иначе не тратим трафик).
         // Пр.125.E: в режиме экономии ПЛАНОВАЯ проба плашки в простое ОТКЛЮЧЕНА — замер активного туннеля только
         // по подозрению (лестница восстановления), не по расписанию. Пассивный сэмпл (шаг 1) бесплатен — он остаётся.

@@ -203,6 +203,45 @@ public sealed class ServiceAndFullTestIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void First_measure_happens_even_under_constant_traffic()
+    {
+        var servers = ImportServers(net.StartVlessServer());
+        var key = SubscriptionManager.serverKey(servers[0]);
+        var localUrl = $"http://127.0.0.1:{net.HttpPort}/bytes?n=30000000&slow=1";
+        var savedUpload = ServerSpeedTester.uploadFallbacks;
+        ServerSpeedTester.uploadFallbacks = [];
+        SettingsStore.update(ctx, SettingsStore.current() with { directProbeUrl = localUrl, uploadProbeUrl = $"http://127.0.0.1:{net.HttpPort}/up?slow=1" });
+        using var stop = new CancellationTokenSource();
+        var traffic = Task.Run(async () =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                try
+                {
+                    using var c = CoreControllerIntegrationTests.ViaSocks(XrayConfig.SOCKS_PORT);
+                    await c.GetByteArrayAsync($"http://127.0.0.1:{net.HttpPort}/bytes?n=1000000", stop.Token);
+                }
+                catch (Exception) { await Task.Delay(200); }
+            }
+        });
+        try
+        {
+            XrayProxyService.start(ctx, XrayConfigBuilder.build(servers[0]), ServerLabels.full(servers[0]), key);
+            Assert.True(WaitUntil(() => { MonitorCoordinator.wake(); var s = TunnelSpeed.snapshot(); return s.serverKey == key && s.measuredAtMs > 0L; }, 40_000),
+                $"при постоянном трафике замера нет: {TunnelSpeed.snapshot()}");
+        }
+        finally
+        {
+            stop.Cancel();
+            ServerSpeedTester.uploadFallbacks = savedUpload;
+            SettingsStore.update(ctx, SettingsStore.current() with { directProbeUrl = SettingsStore.DEFAULTS.directProbeUrl, uploadProbeUrl = SettingsStore.DEFAULTS.uploadProbeUrl });
+            WaitUntil(() => ProxyState.state.value.running, 10_000);
+            XrayProxyService.stop(ctx);
+            WaitUntil(() => !PortOpen(10815), 10_000);
+        }
+    }
+
+    [Fact]
     public void FullTest_compares_exact_speed_with_exact_speed()
     {
         // Журнал Elyor 2026-11-02: короткий замер дал первому рабочему ≈53, и точные замеры остальных сравнивались с этой оценкой.
