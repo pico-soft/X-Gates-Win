@@ -483,13 +483,14 @@ public static class NetworkMonitor
                         {
                             // Порог замера = порог деградации: короткий замер (бюджет под этот порог) уверенно отвечает на
                             // вопрос «активный ниже порога?». Быстрый сервер подтвердит порог за доли МБ и остановится.
-                            var mbps = ServerSpeedTester.measureSufficiency(app, curSrv0, cur.degradationMinMbps.coerceAtLeast(0.1));
+                            var mbps = measureEnough(app, curSrv0, cur.degradationMinMbps.coerceAtLeast(0.1));
                             if (mbps < cur.minUsableMbps)
                             {
                                 // пинг есть, но трафик реально НЕ идёт (полу-мёртвый) → в восстановление. Таймер НЕ двигаем:
                                 // следующий цикл перемерит; устойчивый провал → grace истечёт → лестница сменит сервер.
                                 // Замер идёт отдельным временным ядром и мог упасть сам по себе: судим по самому туннелю.
                                 aliveNow = ExternalIpChecker.fetch() != null;
+                                if (aliveNow) lastLivenessMeasureMs = now();   // туннель жив: на шнуре временное ядро поднималось бы каждые 10 с
                             }
                             else
                             {

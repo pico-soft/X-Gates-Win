@@ -240,6 +240,25 @@ public sealed class OutageRecoveryTests : IDisposable
     }
 
     [Fact]
+    public void Failed_measure_of_a_live_tunnel_is_not_repeated_every_cycle()
+    {
+        var servers = Import(net.StartVlessServer(), net.StartVlessServer());
+        ExternalIpChecker.onceOverrideForTest = _ => "198.51.100.1";   // туннель жив, а трафика нет: иначе монитор засчитает его за работу пользователя
+        var measures = 0;
+        var saved = NetworkMonitor.measureEnough;
+        NetworkMonitor.measureEnough = (_, _, _) => { Interlocked.Increment(ref measures); return -1.0; };
+        try
+        {
+            Start(servers.First(it => it.remarks == "srv0"));
+            Assert.True(WaitUntil(() => Volatile.Read(ref measures) > 0, 60_000, wake: true), "замера не было");
+            var end = Environment.TickCount64 + 30_000;
+            while (Environment.TickCount64 < end) { MonitorCoordinator.wake(); Thread.Sleep(250); }
+            Assert.Equal(1, Volatile.Read(ref measures));
+        }
+        finally { NetworkMonitor.measureEnough = saved; }
+    }
+
+    [Fact]
     public void Failed_service_measure_does_not_condemn_a_tunnel_that_still_passes_traffic()
     {
         int a = net.StartVlessServer(), b = net.StartVlessServer();
