@@ -74,6 +74,8 @@ public sealed class CascadeFetchIntegrationTests : IDisposable
         try
         {
             CascadeFetch.ownSocksPort = () => socks;
+            var end = Environment.TickCount64 + 5_000;   // на Windows порт иногда отвечает чуть позже строки «started» (прогон 41471700983)
+            while (!CascadeFetch.isOwnProxyUp() && Environment.TickCount64 < end) Thread.Sleep(100);
             // acceptBody отвергает прямую ступень (как «заглушка блокировщика»), туннель отдаёт то же тело → принято.
             int calls = 0;
             var r = CascadeFetch.fetch(ctx, U("/sub"), "ua", 3000, 5000, 20_000,
