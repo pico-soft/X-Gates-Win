@@ -3,7 +3,12 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text.Json.Nodes;
 using XGates.Core.Libv2ray;
+using XGates.Core.Monitor;
+using XGates.Core.Net;
 using XGates.Core.Platform;
+using XGates.Core.Service;
+using XGates.Core.Settings;
+using XGates.Core.Subscription;
 using XGates.Core.Xray;
 using XGates.Core.Xray.Link;
 using L = XGates.Core.Libv2ray.Libv2ray;
@@ -25,20 +30,37 @@ public sealed class SoakTests : IDisposable
 
     public void Dispose()
     {
+        XrayProxyService.shutdown();
         ServerSpeedTester.probesOverrideForTest = null;
+        NetworkMonitor.directAliveOverrideForTest = null;
+        ExternalIpChecker.onceOverrideForTest = null;
+        WinSettingsStore.resetForTest();
         net.Dispose();
         try { Directory.Delete(ctx.filesDir, true); } catch (IOException) { }
     }
 
-    /// <summary>Исходящие соединения, как у браузера: на Windows они занимали порт временного ядра, пока тот запускался.</summary>
+    /// <summary>
+    /// Исходящие соединения, как у браузера: на Windows они занимали порт временного ядра, пока тот запускался. Темп обычный: цикл без пауз за секунды
+    /// исчерпывает порты Windows (каждый закрытый ещё две минуты занят), и тогда не работает ничего, прогон 41525975146.
+    /// </summary>
     private Task churn(CancellationToken stop) => Task.Run(() =>
     {
         while (!stop.IsCancellationRequested)
         {
             try { using var c = new TcpClient(); c.Connect(IPAddress.Loopback, net.HttpPort); }
             catch (SocketException) { }
+            Thread.Sleep(50);
         }
     }, stop);
+
+    private ServerSpeedTester.Measurement shortMeasure(ServerProfile p) =>
+        ServerSpeedTester.measureSpeedDetailed(ctx, p, warmupMs: 400, measureMs: 1200, warmupBudgetOverride: 512 * 1024L, measureBudgetOverride: 1_200_000L);
+
+    private static void report(List<string> fails, int total, Stopwatch time)
+    {
+        var byReason = fails.GroupBy(f => f[(f.IndexOf(':') + 1)..].Trim()).OrderByDescending(g => g.Count()).Take(10).Select(g => $"{g.Count()} × {g.First()}");
+        Assert.True(fails.Count == 0, $"сбоев {fails.Count} из {total} за {time.Elapsed.TotalSeconds:F0} с:\n{string.Join("\n", byReason)}");
+    }
 
     [Fact]
     public void Short_measure_of_a_live_server()
@@ -52,11 +74,42 @@ public sealed class SoakTests : IDisposable
         for (var i = 0; i < rounds; i++)
         {
             var t = Stopwatch.StartNew();
-            var m = ServerSpeedTester.measureSpeedDetailed(ctx, p, warmupMs: 400, measureMs: 1200, warmupBudgetOverride: 512 * 1024L, measureBudgetOverride: 1_200_000L);
+            var m = shortMeasure(p);
             if (!m.ok) fails.Add($"#{i} {t.ElapsedMilliseconds} мс: {m.reason}");
         }
         stop.Cancel();
-        Assert.True(fails.Count == 0, $"сбоев {fails.Count} из {rounds} за {total.Elapsed.TotalSeconds:F0} с:\n{string.Join("\n", fails)}");
+        report(fails, rounds, total);
+    }
+
+    /// <summary>Как в прогоне 41455944519: туннель только что поднялся, и сразу идёт первый замер этого же сервера временным ядром.</summary>
+    [Fact]
+    public void Short_measure_right_after_the_tunnel_starts()
+    {
+        if (rounds == 0) return;
+        NetworkMonitor.directAliveOverrideForTest = () => true;
+        ExternalIpChecker.onceOverrideForTest = _ => "198.51.100.1";
+        WinSettingsStore.update(ctx, new WinSettings { socksPort = LocalTestNet.FreePort(), httpPort = LocalTestNet.FreePort() });
+        SubscriptionManager.init(ctx);
+        var (_, r) = SubscriptionManager.addLocalFromBody(ctx, $"vless://{LocalTestNet.Uuid}@127.0.0.1:{net.StartVlessServer()}?type=tcp&security=none#soak", "local");
+        Assert.True(r.ok, r.error);
+        var p = SubscriptionManager.allServers(ctx).Single();
+        var key = SubscriptionManager.serverKey(p);
+        var fails = new List<string>();
+        var total = Stopwatch.StartNew();
+        for (var i = 0; i < rounds; i++)
+        {
+            XrayProxyService.start(ctx, XrayConfigBuilder.build(p), "soak", key);
+            var end = Environment.TickCount64 + 10_000;
+            while (!ProxyState.state.value.running && Environment.TickCount64 < end) Thread.Sleep(20);
+            Assert.True(ProxyState.state.value.running, ProxyState.state.value.message);
+            var t = Stopwatch.StartNew();
+            var m = shortMeasure(p);
+            if (!m.ok) fails.Add($"#{i} {t.ElapsedMilliseconds} мс: {m.reason}");
+            XrayProxyService.stop(ctx);
+            end = Environment.TickCount64 + 10_000;
+            while (ProxyState.state.value.running && Environment.TickCount64 < end) Thread.Sleep(20);
+        }
+        report(fails, rounds, total);
     }
 
     [Fact]
@@ -66,7 +119,8 @@ public sealed class SoakTests : IDisposable
         string[] queries = ["", "&headerType=srtp", "&headerType=utp", "&headerType=wechat-video", "&headerType=dtls", "&headerType=wireguard", "&headerType=dns", "&seed=s3cret", "&headerType=srtp&seed=s3cret"];
         var fails = new List<string>();
         var total = Stopwatch.StartNew();
-        for (var i = 0; i < rounds; i++)
+        var mkcpRounds = rounds * 5;   // проход 0,3 с, а сбой был один на сотни проходов
+        for (var i = 0; i < mkcpRounds; i++)
         {
             var query = queries[i % queries.Length];
             var draft = VlessParser.parse($"vless://{LocalTestNet.Uuid}@127.0.0.1:1?type=kcp&security=none{query}#k")!;
@@ -99,6 +153,6 @@ public sealed class SoakTests : IDisposable
             finally { core.stopLoop(); }
             net.StopVlessServer(server);
         }
-        Assert.True(fails.Count == 0, $"сбоев {fails.Count} из {rounds} за {total.Elapsed.TotalSeconds:F0} с:\n{string.Join("\n", fails)}");
+        report(fails, mkcpRounds, total);
     }
 }
