@@ -141,20 +141,9 @@ public partial class MainWindow : Window
         PausedBanner.Visibility = V(st.paused);
         AddSubscriptionHint.Visibility = V(s.sourcesEmpty);
 
-        // Цвет плашки — правило Elyor (StatusBox Kotlin): выкл серый; обрыв тёмно-красный; не подтверждено серый; по скорости.
-        // 1–5 Мбит/с на Windows оливковые, а не сине-серые (Elyor 2026-11-01): туннель работает, серый читался как «что-то не так».
         var liveFresh = (st.tunnelDownMbps ?? 0.0) > 0.0 && st.liveMeasuredAtMs > 0 && JavaSystem.currentTimeMillis() - st.liveMeasuredAtMs <= MainScreenModel.HEALTH_FRESH_MS;
         var colorSpeed = Math.Max(liveFresh ? st.tunnelDownMbps ?? 0.0 : 0.0, st.speedMbps ?? 0.0);
-        (uint bg, uint fg) =
-            !st.running ? (0xFF3A3A3Au, 0xFFBDBDBDu) :
-            st.problem ? (0xFF7F1D1Du, 0xFFFFCDD2u) :
-            !st.verified ? (0xFF5C5C5Cu, 0xFFE8E8E8u) :
-            colorSpeed > 0.0
-                ? colorSpeed > 5.0 ? (0xFF1B5E20u, 0xFFA5D6A7u)
-                : colorSpeed >= 1.0 ? (0xFF465222u, 0xFFD9E2B0u)
-                : colorSpeed >= 0.2 ? (0xFF5D4037u, 0xFFD7CCC8u)
-                : (0xFF5D2A2Au, 0xFFEF9A9Au)
-            : (0xFF1B5E20u, 0xFFA5D6A7u);
+        var (bg, fg) = PlateColors.of(st.running, st.problem, st.verified, colorSpeed);
         StatusBox.Background = B(bg);
         var fgB = B(fg);
         foreach (var tb in StatusPanel.Children.OfType<TextBlock>()) tb.Foreground = fgB;
