@@ -53,7 +53,7 @@ public sealed class PlateColorsTests
     [Fact]
     public void Colour_gets_greener_as_speed_grows()
     {
-        var previous = int.MinValue;
+        var previous = -255;
         foreach (var mbps in Speeds())
         {
             var (r, g, _) = Rgb(PlateColors.forSpeed(mbps).bg);
