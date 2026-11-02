@@ -142,10 +142,11 @@ public static class XrayProxyService
     // ---- команды (аналог Intent-действий) ----
 
     /// <summary>Запуск с готовым конфигом.</summary>
-    public static void start(Context context, string config, string label, string serverKey)
+    /// <summary>[auto]: сервер выбрал монитор. Ядро его не приняло — идём дальше по живым; человеку, наоборот, показываем ошибку.</summary>
+    public static void start(Context context, string config, string label, string serverKey, bool auto = false)
     {
         ensureCreated(context);
-        handleStart(config, label, serverKey);
+        handleStart(config, label, serverKey, auto);
     }
 
     public static void stop(Context context)
@@ -164,7 +165,7 @@ public static class XrayProxyService
     /// <summary>«Повторить обход» системного VPN (Промпт 62.C). Windows: обход — фаза 2, no-op.</summary>
     public static void retryVpnBypass(Context context) { }
 
-    private static void handleStart(string? config, string? label, string? serverKey)
+    private static void handleStart(string? config, string? label, string? serverKey, bool auto = false)
     {
         if (string.IsNullOrEmpty(config)) return;
         NotificationHelper.updateStatus(label);
@@ -181,7 +182,7 @@ public static class XrayProxyService
 
         coreActive = true;
         var gen = newCoreOp();
-        KThread.start(() => runCoreStart(config, label, serverKey, gen), "core-start");
+        KThread.start(() => runCoreStart(config, label, serverKey, gen, auto), "core-start");
     }
 
     /**
@@ -246,10 +247,29 @@ public static class XrayProxyService
     }
 
     /// <summary>Блокирующий подъём ядра (старт xray → пробы портов). Зовётся из ФОНОВОГО потока.</summary>
-    private static void runCoreStart(string config, string? label, string? serverKey, long gen) =>
-        runCoreOp(gen, $"старт «{label}»", () => runCoreStartLocked(config, label, serverKey));
+    private static void runCoreStart(string config, string? label, string? serverKey, long gen, bool auto = false) =>
+        runCoreOp(gen, $"старт «{label}»", () => runCoreStartLocked(config, label, serverKey, gen, auto));
 
-    private static void runCoreStartLocked(string config, string? label, string? serverKey)
+    // Серверы, которых ядро не приняло в этой цепочке автопереключения (только под CoreOpSync).
+    private static readonly HashSet<string> rejectedInSwitch = [];
+
+    /**
+     * Ядро не приняло сервер, выбранный монитором. Прежнее ядро к этому моменту остановлено, а без запущенного прокси нет и монитора, так что связь
+     * лежала бы до нажатия ▶. Решение Elyor 2026-11-02: идём по живым от самого быстрого к самому медленному. false — идти некуда, дальше обычная ошибка.
+     */
+    private static bool nextAfterFailedSwitch(long gen, bool auto, string? failedLabel, string? failedKey, string? why)
+    {
+        if (!auto || failedKey == null) return false;
+        if (gen != Interlocked.Read(ref coreOpGen)) return true;   // есть более поздний запрос: состояние определит он
+        rejectedInSwitch.Add(failedKey);
+        SubscriptionManager.applyPingResults(app!, new Dictionary<string, int> { [failedKey] = -1 });
+        if (NetworkMonitor.nextAliveAfterFailedStart(app!, rejectedInSwitch) is not { } next) { rejectedInSwitch.Clear(); return false; }
+        MonitorLog.@event(app!, "monitor", "Сервер не поднялся — беру следующий по скорости", $"{failedLabel}: {why ?? "ядро не запустилось"} → {ServerLabels.display(next.profile)}");
+        runCoreStartLocked(next.config, ServerLabels.full(next.profile), SubscriptionManager.serverKey(next.profile), gen, auto: true);
+        return true;
+    }
+
+    private static void runCoreStartLocked(string config, string? label, string? serverKey, long gen, bool auto)
     {
         // Весь поток старта под перехватом: любая ошибка → сообщение + стоп, НЕ падение.
         try
@@ -276,12 +296,14 @@ public static class XrayProxyService
             try { ok = XrayController.start(app!, config); }
             catch (Exception e)
             {
+                if (nextAfterFailedSwitch(gen, auto, label, serverKey, e.Message)) return;
                 ProxyState.update(running: false, label: label, serverKey: serverKey, message: $"ОШИБКА: {e.Message}");
                 NotificationHelper.clearStatus();
                 return;
             }
             if (ok)
             {
+                rejectedInSwitch.Clear();
                 var socks = probe(XrayConfig.SOCKS_PORT);
                 var http = probe(XrayConfig.HTTP_PORT);
                 ProxyState.update(running: true, label: label, serverKey: serverKey,
@@ -290,7 +312,7 @@ public static class XrayProxyService
                 startTrafficPolling();
                 // Монитор поднимается РЕАКТИВНО (подписка на ProxyState в ensureCreated) — здесь не зовём.
             }
-            else
+            else if (!nextAfterFailedSwitch(gen, auto, label, serverKey, null))
             {
                 ProxyState.update(running: false, label: label, serverKey: serverKey, message: "ядро не запустилось");
                 NotificationHelper.clearStatus();

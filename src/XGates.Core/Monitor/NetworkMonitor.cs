@@ -917,7 +917,7 @@ public static class NetworkMonitor
                     restartedKeySinceOk = curKey;
                     MonitorLog.@event(app, "monitor", "Восстановление: перезапуск ядра (запасной)", ServerLabels.display(curSrv));
                     TunnelHealth.setPhase(TunnelHealth.Phase.RECOVERING, now(), "пробую переподключиться к серверу");
-                    XrayProxyService.start(app, cfg, ServerLabels.full(curSrv), curKey);
+                    XrayProxyService.start(app, cfg, ServerLabels.full(curSrv), curKey, auto: true);
                     var waited = 0;
                     while (waited < 8000 && (!ProxyState.state.value.running || ProxyState.state.value.serverKey != curKey)) { await delay(500); waited += 500; }
                     await delay(1500);
@@ -935,6 +935,20 @@ public static class NetworkMonitor
 
     /// <summary>Короткий замер для решений «держать лучший» (подменяется в тестах: настоящий на стенде шумит).</summary>
     internal static Func<Context, ServerProfile, double, double> measureEnough = ServerSpeedTester.measureSufficiency;
+
+    /// <summary>Следующий живой сервер от быстрого к медленному, если ядро не приняло выбранный (решение Elyor 2026-11-02). Конфиг не собрался — пропускаем.</summary>
+    internal static (ServerProfile profile, string config)? nextAliveAfterFailedStart(Context app, HashSet<string> rejected)
+    {
+        var s = SettingsStore.current();
+        var bl = BlocklistStore.current();
+        var pool = SubscriptionManager.allServers(app).Where(it => !rejected.Contains(SubscriptionManager.serverKey(it)) && allowedCandidate(it, s, bl)).ToList();
+        foreach (var p in orderFastCandidates(pool, it => isUnstableKey(SubscriptionManager.serverKey(it))))
+        {
+            try { return (p, XrayConfigBuilder.build(p)); }
+            catch (Exception) { rejected.Add(SubscriptionManager.serverKey(p)); }
+        }
+        return null;
+    }
 
     /// <summary>Живость активного UDP-сервера: TCP-пинг к нему не проходит, а временное ядро каждый цикл дорого. Судим по ответу через сам туннель.</summary>
     private static int tunnelPing()
@@ -976,7 +990,7 @@ public static class NetworkMonitor
         try { cfg = XrayConfigBuilder.build(c); }
         catch (Exception) { MonitorLog.@event(app, "error", $"Кандидат {ServerLabels.display(c)}: ошибка конфига", ""); return (-1.0, false); }
         var from = ServerLabels.displayForKey(app, fromKey);
-        XrayProxyService.start(app, cfg, ServerLabels.full(c), key);
+        XrayProxyService.start(app, cfg, ServerLabels.full(c), key, auto: true);
         MonitorLog.@switch(app, from, ServerLabels.display(c), "монитор", "обрыв → подключение по пингу");
         var waited = 0;
         while (waited < 8000 && (!ProxyState.state.value.running || ProxyState.state.value.serverKey != key)) { await delay(500); waited += 500; }
@@ -1135,7 +1149,7 @@ public static class NetworkMonitor
             try { cfg = XrayConfigBuilder.build(c); }
             catch (Exception) { MonitorLog.@event(app, "error", $"Кандидат {ServerLabels.display(c)}: ошибка конфига", ""); return null; }
             var from = ServerLabels.displayForKey(app, startKey);
-            XrayProxyService.start(app, cfg, ServerLabels.full(c), SubscriptionManager.serverKey(c));
+            XrayProxyService.start(app, cfg, ServerLabels.full(c), SubscriptionManager.serverKey(c), auto: true);
             MonitorLog.@switch(app, from, ServerLabels.display(c), "монитор", $"первый живой (проход {round})");
             await measureAfterConnect(app, c);
             return SwitchResult.SWITCHED;
@@ -1395,7 +1409,7 @@ public static class NetworkMonitor
                 string cfg;
                 try { cfg = XrayConfigBuilder.build(target); } catch (Exception) { return Task.CompletedTask; }
                 var from = ServerLabels.displayForKey(app, curKey);
-                XrayProxyService.start(app, cfg, ServerLabels.full(target), bestKey);
+                XrayProxyService.start(app, cfg, ServerLabels.full(target), bestKey, auto: true);
                 MonitorLog.@switch(app, from, ServerLabels.display(target), "монитор: держать лучший",
                     $"было {fmt(curMbps)} → стало {fmt(bestMbps)} (×{s.keepBestMultiplier})");
             }
@@ -1734,7 +1748,7 @@ public static class NetworkMonitor
                     string cfg;
                     try { cfg = XrayConfigBuilder.build(cand); } catch (Exception) { continue; }
                     var from = ServerLabels.displayForKey(app, curKey);
-                    XrayProxyService.start(app, cfg, ServerLabels.full(cand), SubscriptionManager.serverKey(cand));
+                    XrayProxyService.start(app, cfg, ServerLabels.full(cand), SubscriptionManager.serverKey(cand), auto: true);
                     MonitorLog.@switch(app, from, ServerLabels.display(cand), "деградация: кандидат приемлемо быстрее",
                         $"{fmt(passiveDown)} → {fmt(candMbps)}");
                     await measureAfterConnect(app, cand);

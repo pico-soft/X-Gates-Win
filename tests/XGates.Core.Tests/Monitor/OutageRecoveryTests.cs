@@ -249,6 +249,42 @@ public sealed class OutageRecoveryTests : IDisposable
         finally { NetworkMonitor.measureEnough = saved; }
     }
 
+    /// <summary>Активный srv0 и другие с уже свежими скоростями: мерить в топе нечего, а решение принимать надо.</summary>
+    private List<ServerProfile> FreshTop(params double[] speeds)
+    {
+        var servers = Import(speeds.Select(_ => net.StartVlessServer()).ToArray());
+        SubscriptionManager.applyPingResults(ctx, servers.ToDictionary(SubscriptionManager.serverKey, _ => 20));
+        SubscriptionManager.applySpeedResults(ctx, speeds.Select((v, i) => (key: SubscriptionManager.serverKey(servers.First(it => it.remarks == $"srv{i}")), v)).ToDictionary(x => x.key, x => x.v));
+        return servers;
+    }
+
+    [Fact]
+    public void Server_rejected_by_core_gives_way_to_the_next_fastest()
+    {
+        var servers = FreshTop(5.0, 30.0, 60.0);
+        Start(servers.First(it => it.remarks == "srv0"));
+        var bad = servers.First(it => it.remarks == "srv2");
+        var badKey = SubscriptionManager.serverKey(bad);
+
+        XrayProxyService.start(ctx, "{ сломанный конфиг", "bad", badKey, auto: true);
+
+        var expected = SubscriptionManager.serverKey(servers.First(it => it.remarks == "srv1"));   // самый быстрый из оставшихся, а не прежний
+        Assert.True(WaitUntil(() => ProxyState.state.value.running && ProxyState.state.value.serverKey == expected, 10_000), ProxyState.state.value.message);
+        Assert.Equal(-1, SubscriptionManager.allServers(ctx).First(it => SubscriptionManager.serverKey(it) == badKey).pingMs);
+    }
+
+    [Fact]
+    public void Server_chosen_by_a_person_still_shows_the_error()
+    {
+        var servers = FreshTop(5.0, 30.0);
+        Start(servers.First(it => it.remarks == "srv0"));
+        var other = SubscriptionManager.serverKey(servers.First(it => it.remarks == "srv1"));
+
+        XrayProxyService.start(ctx, "{ сломанный конфиг", "bad", other);
+
+        Assert.True(WaitUntil(() => !ProxyState.state.value.running && ProxyState.state.value.message.StartsWith("ОШИБКА"), 10_000), ProxyState.state.value.message);
+    }
+
     [Fact]
     public void Live_udp_tunnel_is_kept_though_tcp_ping_never_answers()
     {
@@ -296,7 +332,12 @@ public sealed class OutageRecoveryTests : IDisposable
         ExternalIpChecker.onceOverrideForTest = _ => "198.51.100.1";   // туннель жив, а трафика нет: иначе монитор засчитает его за работу пользователя
         var measures = 0;
         var saved = NetworkMonitor.measureEnough;
-        NetworkMonitor.measureEnough = (_, _, _) => { Interlocked.Increment(ref measures); return -1.0; };
+        // Считаем только проверку живости: она меряет до порога деградации, а поиск быстрого сервера идёт своим расписанием.
+        NetworkMonitor.measureEnough = (_, _, threshold) =>
+        {
+            if (threshold <= SettingsStore.current().degradationMinMbps) Interlocked.Increment(ref measures);
+            return -1.0;
+        };
         try
         {
             Start(servers.First(it => it.remarks == "srv0"));
