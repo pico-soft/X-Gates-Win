@@ -13,7 +13,11 @@ permissions:
 jobs:
   soak:
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        pool: ['app', 'default']   # default: контроль без ThreadPoolSetup на той же сборке
     steps:
       - uses: actions/checkout@v4
 
@@ -36,5 +40,6 @@ jobs:
 
       - name: Серии повторов
         env:
-          XGATES_SOAK: '600'
-        run: dotnet test tests/XGates.Core.Tests -c Release --blame-hang-timeout 30m --filter "FullyQualifiedName~SoakTests" --logger "console;verbosity=normal"
+          XGATES_SOAK: '100'
+          XGATES_SOAK_POOL: ${{ matrix.pool }}
+        run: dotnet test tests/XGates.Core.Tests -c Release --blame-hang-timeout 50m --filter "FullyQualifiedName~SoakTests" --logger "console;verbosity=normal"

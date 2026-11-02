@@ -46,6 +46,8 @@ public sealed class MkcpIntegrationTests : IDisposable
             using var c = CoreControllerIntegrationTests.ViaSocks(socks);
             Assert.Equal(200_000, c.GetByteArrayAsync($"http://127.0.0.1:{net.HttpPort}/bytes?n=200000").Result.Length);
         }
+        // Сбой был один на сотни полных прогонов и в 6000 отдельных проходов не повторился: пусть следующий объяснит себя сам.
+        catch (AggregateException e) { Assert.Fail($"{e.InnerException?.Message}; потоков пула {ThreadPool.ThreadCount}, в очереди {ThreadPool.PendingWorkItemCount}; ядро: {core.recentOutput()}"); }
         finally { core.stopLoop(); }
     }
 }

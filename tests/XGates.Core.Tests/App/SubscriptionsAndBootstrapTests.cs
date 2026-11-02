@@ -169,7 +169,10 @@ public sealed class SubscriptionsAndBootstrapTests : IDisposable
             Directory.CreateDirectory(Path.Combine(dir, "updates"));
             File.WriteAllText(Path.Combine(dir, "updates", "XGatesWin-0.0-win-x64.msi"), "старый установщик");
             UpdateAutoCheck.skipOnLaunch = true;
+            ThreadPool.SetMinThreads(Environment.ProcessorCount, Environment.ProcessorCount);
             var c = AppBootstrap.start(dir);
+            ThreadPool.GetMinThreads(out var poolWorkers, out var poolIo);
+            Assert.True(poolWorkers >= XGates.Core.Platform.ThreadPoolSetup.MIN_THREADS && poolIo >= XGates.Core.Platform.ThreadPoolSetup.MIN_THREADS, $"пул {poolWorkers}/{poolIo}");
             Assert.Equal(dir, c.filesDir);
             Assert.Equal(21000, XGates.Core.Xray.XrayConfig.SOCKS_PORT);   // WinSettingsStore загружен
             Assert.True(File.Exists(AppBootstrap.logFile(c)));               // журнал пишется в файл

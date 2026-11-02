@@ -24,6 +24,7 @@ public static class AppBootstrap
 
     public static Context start(string dataDir, bool logToFile = true)
     {
+        ThreadPoolSetup.apply();
         var context = new Context(dataDir);
         if (logToFile) Log.Sink = new Log.FileSink(logFile(context));
         // XrayApp.onCreate: обработчик падений МАКСИМАЛЬНО РАНО (до окна и «сервиса»).

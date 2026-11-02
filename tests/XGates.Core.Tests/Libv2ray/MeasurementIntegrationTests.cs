@@ -68,6 +68,24 @@ public sealed class MeasurementIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void Busy_thread_pool_does_not_stall_a_measure()
+    {
+        // Монитор держит потоки пула, а завершения сетевых операций выполняет тот же пул. Без ThreadPoolSetup замер живого сервера занимал секунды или проваливался.
+        var p = Vless(net.StartVlessServer());
+        using var hold = new ManualResetEventSlim();
+        for (var i = 0; i < Math.Min(2 * Environment.ProcessorCount + 8, ThreadPoolSetup.MIN_THREADS - 8); i++)
+            ThreadPool.UnsafeQueueUserWorkItem(_ => hold.Wait(), null);
+        try
+        {
+            var t = System.Diagnostics.Stopwatch.StartNew();
+            var m = ServerSpeedTester.measureSpeedDetailed(ctx, p, warmupMs: 400, measureMs: 1200, warmupBudgetOverride: 512 * 1024L, measureBudgetOverride: 1_200_000L);
+            Assert.True(m.ok, m.reason);
+            Assert.True(t.ElapsedMilliseconds < 2_000, $"{t.ElapsedMilliseconds} мс, потоков пула {ThreadPool.ThreadCount}");
+        }
+        finally { hold.Set(); }
+    }
+
+    [Fact]
     public void Speed_through_real_tunnel_full_minimal_sufficiency()
     {
         var p = Vless(net.StartVlessServer());

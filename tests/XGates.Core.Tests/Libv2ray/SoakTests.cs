@@ -112,6 +112,58 @@ public sealed class SoakTests : IDisposable
         report(fails, rounds, total);
     }
 
+    /// <summary>
+    /// Пул потоков остыл: простой дольше 20 с, лишние потоки завершились. Так идёт первый замер после долгого простоя и в полном прогоне, а длинная серия подряд держит пул
+    /// разогретым и потому почти не падает. XGATES_SOAK_POOL=default убирает ThreadPoolSetup: контроль на той же сборке. Замер дольше 2 с (норма 0,3 с) тоже считается сбоем.
+    /// </summary>
+    [Fact]
+    public void Short_measure_with_a_cold_thread_pool()
+    {
+        if (rounds == 0) return;
+        var withoutFix = Environment.GetEnvironmentVariable("XGATES_SOAK_POOL") == "default";
+        if (withoutFix) ThreadPool.SetMinThreads(Environment.ProcessorCount, Environment.ProcessorCount);
+        NetworkMonitor.directAliveOverrideForTest = () => true;
+        ExternalIpChecker.onceOverrideForTest = _ => "198.51.100.1";
+        ServerSpeedTester.uploadFallbacks = [];
+        WinSettingsStore.update(ctx, new WinSettings { socksPort = LocalTestNet.FreePort(), httpPort = LocalTestNet.FreePort() });
+        SettingsStore.update(ctx, SettingsStore.current() with
+        {
+            directProbeUrl = $"http://127.0.0.1:{net.HttpPort}/bytes?n=30000000&slow=1",
+            uploadProbeUrl = $"http://127.0.0.1:{net.HttpPort}/up?slow=1",
+        });
+        SubscriptionManager.init(ctx);
+        var (_, r) = SubscriptionManager.addLocalFromBody(ctx, $"vless://{LocalTestNet.Uuid}@127.0.0.1:{net.StartVlessServer()}?type=tcp&security=none#soak", "local");
+        Assert.True(r.ok, r.error);
+        var p = SubscriptionManager.allServers(ctx).Single();
+        var key = SubscriptionManager.serverKey(p);
+        var coldRounds = Math.Min(rounds, 60);
+        var fails = new List<string>();
+        var total = Stopwatch.StartNew();
+        try
+        {
+            for (var i = 0; i < coldRounds; i++)
+            {
+                Thread.Sleep(25_000);
+                XrayProxyService.start(ctx, XrayConfigBuilder.build(p), "soak", key);
+                var end = Environment.TickCount64 + 10_000;
+                while (!ProxyState.state.value.running && Environment.TickCount64 < end) Thread.Sleep(20);
+                var t = Stopwatch.StartNew();
+                var m = shortMeasure(p);
+                if (!m.ok || t.ElapsedMilliseconds > 2_000) fails.Add($"#{i} {t.ElapsedMilliseconds} мс: {(m.ok ? "медленно" : m.reason)}");
+                XrayProxyService.stop(ctx);
+                end = Environment.TickCount64 + 10_000;
+                while (ProxyState.state.value.running && Environment.TickCount64 < end) Thread.Sleep(20);
+            }
+        }
+        finally
+        {
+            ThreadPoolSetup.apply();
+            ServerSpeedTester.uploadFallbacks = ["https://speed.cloudflare.com/__up", "http://speedtest.tele2.net/upload.php"];
+            SettingsStore.update(ctx, SettingsStore.current() with { directProbeUrl = SettingsStore.DEFAULTS.directProbeUrl, uploadProbeUrl = SettingsStore.DEFAULTS.uploadProbeUrl });
+        }
+        report(fails, coldRounds, total);
+    }
+
     [Fact]
     public void Mkcp_tunnel()
     {
