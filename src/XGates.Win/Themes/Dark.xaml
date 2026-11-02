@@ -1,0 +1,31 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Палитра окна при включённом переключателе «Тёмная тема». Те же ключи есть в Light.xaml. -->
+    <SolidColorBrush x:Key="WindowBg" Color="#1E1F22" />
+    <SolidColorBrush x:Key="Text" Color="#E6E6E6" />
+    <SolidColorBrush x:Key="Gray" Color="#9E9E9E" />
+    <SolidColorBrush x:Key="LiveBg" Color="#1F2A21" />
+    <SolidColorBrush x:Key="PrevBg" Color="#1F2430" />
+    <SolidColorBrush x:Key="AllBg" Color="#25282C" />
+    <SolidColorBrush x:Key="Accent" Color="#64B5F6" />
+    <SolidColorBrush x:Key="AccentFill" Color="#1565C0" />
+    <SolidColorBrush x:Key="RowActive" Color="#24385A" />
+    <SolidColorBrush x:Key="RowLine" Color="#18FFFFFF" />
+    <SolidColorBrush x:Key="CardLine" Color="#30FFFFFF" />
+    <SolidColorBrush x:Key="ErrorText" Color="#EF9A9A" />
+    <SolidColorBrush x:Key="OkText" Color="#81C784" />
+    <SolidColorBrush x:Key="WarnBg" Color="#3A2D16" />
+    <SolidColorBrush x:Key="InfoBg" Color="#1B2C3D" />
+    <SolidColorBrush x:Key="SpeedBad" Color="#EF5350" />
+    <SolidColorBrush x:Key="SpeedPoor" Color="#FF7043" />
+    <SolidColorBrush x:Key="SpeedMid" Color="#FFA726" />
+    <SolidColorBrush x:Key="SpeedGood" Color="#66BB6A" />
+
+    <!-- Стандартное оформление Windows берёт фон и текст из системных цветов: подмена здесь перекрашивает диалоги, поля ввода, подсказки и списки только в нашем приложении. -->
+    <SolidColorBrush x:Key="{x:Static SystemColors.WindowBrushKey}" Color="#1E1F22" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.WindowTextBrushKey}" Color="#E6E6E6" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.ControlTextBrushKey}" Color="#E6E6E6" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.GrayTextBrushKey}" Color="#8A8A8A" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.InfoBrushKey}" Color="#2B2D31" />
+    <SolidColorBrush x:Key="{x:Static SystemColors.InfoTextBrushKey}" Color="#E6E6E6" />
+</ResourceDictionary>

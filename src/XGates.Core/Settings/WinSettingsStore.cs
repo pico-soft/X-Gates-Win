@@ -16,6 +16,7 @@ public sealed record WinSettings
     [JsonPropertyName("socksPort")] public int socksPort { get; init; } = XrayConfig.DEFAULT_SOCKS_PORT;
     [JsonPropertyName("httpPort")] public int httpPort { get; init; } = XrayConfig.DEFAULT_HTTP_PORT;
     [JsonPropertyName("tlsFragment")] public bool tlsFragment { get; init; }
+    [JsonPropertyName("darkTheme")] public bool darkTheme { get; init; }
 }
 
 public static class WinSettingsStore

@@ -97,11 +97,13 @@ public partial class MainWindow : Window
 
     public void forceClose() { closing = true; redraw.Stop(); Close(); }
 
-    /// <summary>Тёмная тема Windows: тёмный заголовок и светлый значок. Заголовок не потемнел (старая Windows 10) — значок остаётся чёрным, иначе он пропал бы на светлом.</summary>
+    /// <summary>Тёмный заголовок и светлый значок. Заголовок не потемнел (старая Windows 10) — значок остаётся чёрным, иначе он пропал бы на светлом. Кнопка на панели задач следует теме панели.</summary>
     public void applyTheme()
     {
-        var dark = WinTheme.setDarkTitleBar(new WindowInteropHelper(this).Handle, WinTheme.appsDark) && WinTheme.appsDark;
+        var hwnd = new WindowInteropHelper(this).Handle;
+        var dark = WinTheme.setDarkTitleBar(hwnd, WinTheme.windowsDark) && WinTheme.windowsDark;
         Icon = BitmapFrame.Create(new Uri(dark ? WinTheme.ICON_ON_DARK : WinTheme.ICON));
+        WinTheme.setTaskbarIcon(hwnd);
     }
 
     public void openSettings() { Tabs.SelectedItem = SettingsTab; loadSettings(); }
@@ -117,6 +119,7 @@ public partial class MainWindow : Window
     }
 
     private static SolidColorBrush B(uint argb) => new(Color.FromArgb((byte)(argb >> 24), (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb));
+    private static Brush R(string key) => (Brush)Application.Current.FindResource(key);   // цвет из текущей палитры (Themes)
     private static Visibility V(bool b) => b ? Visibility.Visible : Visibility.Collapsed;
 
     private void renderMain()
@@ -245,20 +248,20 @@ public partial class MainWindow : Window
     /// <summary>Строка списка для привязки (ServerRow Kotlin). Обновляется на месте — см. <see cref="sync"/>.</summary>
     public sealed class RowView(ServerRowInfo info) : System.ComponentModel.INotifyPropertyChanged
     {
-        private static readonly Brush Gray = new SolidColorBrush(Color.FromRgb(0x9E, 0x9E, 0x9E));
         private ServerRowInfo r = info;
         public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
         public void update(ServerRowInfo next)
         {
             if (next == r) return;   // record: равенство по значению — без лишней перерисовки
             r = next;
-            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(string.Empty));   // все свойства
+            refresh();
         }
+        public void refresh() => PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(string.Empty));   // все свойства
         public ServerRowInfo Info => r;
-        public Brush RowBg => r.isActive ? new SolidColorBrush(Color.FromRgb(0xD6, 0xE4, 0xFF)) : Brushes.Transparent;
+        public Brush RowBg => r.isActive ? R("RowActive") : Brushes.Transparent;
         public string Title => (r.isActive ? "● " : "") + (r.number > 0 ? $"{r.number}. " : "") + r.name;
         public FontWeight TitleWeight => r.isActive ? FontWeights.Bold : FontWeights.Normal;
-        public Brush TitleBrush => r.paused ? Gray : Brushes.Black;
+        public Brush TitleBrush => r.paused ? R("Gray") : R("Text");
         public string Caption => r.caption;
         public Visibility CaptionVisibility => V(r.caption.Length > 0);
         public string PingText => r.pingMs is int p ? p < 0 ? "не отвечает" : $"отклик {p} мс" : "";
@@ -268,17 +271,17 @@ public partial class MainWindow : Window
         // Надпись = ЧТО СДЕЛАЕТ нажатие. Значка глаза нет: на Windows 10 он может показаться пустым квадратиком (Elyor 2026-11-01).
         public string EyeText => r.paused ? "Вернуть" : "Скрыть";
         public string EyeTip => r.paused ? "Использовать снова" : "Не использовать";
-        public Brush EyeBrush => r.paused ? Gray : new SolidColorBrush(Color.FromRgb(0x15, 0x65, 0xC0));
+        public Brush EyeBrush => r.paused ? R("Gray") : R("Accent");
         private bool quick => r.speedFull == false && r.speedMbps is > 0.0;
         public string SpeedText => (quick ? "≈" : "") + speedCell(r.speedMbps);
         public FontWeight SpeedWeight => r.speedFull == false ? FontWeights.Normal : FontWeights.Bold;
         public Brush SpeedBrush => r.speedMbps switch
         {
-            null => Gray,
-            <= 0 => new SolidColorBrush(Color.FromRgb(0xD3, 0x2F, 0x2F)),
-            < 1 => new SolidColorBrush(Color.FromRgb(0xBF, 0x36, 0x0C)),
-            < 5 => new SolidColorBrush(Color.FromRgb(0xF5, 0x7C, 0x00)),
-            _ => new SolidColorBrush(Color.FromRgb(0x2E, 0x7D, 0x32)),
+            null => R("Gray"),
+            <= 0 => R("SpeedBad"),
+            < 1 => R("SpeedPoor"),
+            < 5 => R("SpeedMid"),
+            _ => R("SpeedGood"),
         };
         public string SpeedAge => r.speedAge;
         public Visibility SpeedAgeVisibility => V(r.speedAge.Length > 0 && r.speedMbps is > 0.0);
@@ -394,6 +397,7 @@ public partial class MainWindow : Window
         SocksPort.Text = w.socksPort.ToString();
         HttpPort.Text = w.httpPort.ToString();
         TlsFragment.IsChecked = w.tlsFragment;
+        DarkTheme.IsChecked = w.darkTheme;
         HowToText.Text = howTo(w.socksPort, w.httpPort);
         TelegramPort.Text = w.socksPort.ToString();
         FirefoxStatus.Text = FirefoxSetup.statusText(ctx, w.socksPort, w.httpPort);
@@ -551,7 +555,7 @@ public partial class MainWindow : Window
             if (j.Count == 0) JournalPanel.Children.Add(new TextBlock { Text = StatsModel.JOURNAL_EMPTY, Foreground = (Brush)FindResource("Gray"), TextWrapping = TextWrapping.Wrap });
             foreach (var (kind, line, detail) in j.Take(100))
             {
-                var color = kind switch { "switch" => B(0xFF1565C0), "error" => B(0xFFD32F2F), "net" => B(0xFFF9A825), _ => Brushes.Black };
+                var color = kind switch { "switch" => R("Accent"), "error" => R("SpeedBad"), "net" => B(0xFFF9A825), _ => R("Text") };
                 JournalPanel.Children.Add(new TextBlock { Text = line, Foreground = color, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
                 if (detail.Length > 0) JournalPanel.Children.Add(new TextBlock { Text = detail, Foreground = (Brush)FindResource("Gray"), FontSize = 11, TextWrapping = TextWrapping.Wrap });
             }
@@ -683,7 +687,7 @@ public partial class MainWindow : Window
     private void OnApplyPorts(object sender, RoutedEventArgs e)
     {
         if (!int.TryParse(SocksPort.Text.Trim(), out var socks) || !int.TryParse(HttpPort.Text.Trim(), out var http))
-        { PortsStatus.Text = "Порты — целые числа"; PortsStatus.Foreground = Brushes.Firebrick; return; }
+        { PortsStatus.Text = "Порты — целые числа"; PortsStatus.Foreground = R("ErrorText"); return; }
         applyPorts(socks, http);
     }
 
@@ -696,9 +700,9 @@ public partial class MainWindow : Window
     private void applyPorts(int socks, int http)
     {
         var err = XrayConfig.portsError(socks, http);
-        if (err != null) { PortsStatus.Text = err; PortsStatus.Foreground = Brushes.Firebrick; return; }
+        if (err != null) { PortsStatus.Text = err; PortsStatus.Foreground = R("ErrorText"); return; }
         WinSettingsStore.update(ctx, WinSettingsStore.current() with { socksPort = socks, httpPort = http });
-        PortsStatus.Foreground = Brushes.DarkGreen;
+        PortsStatus.Foreground = R("OkText");
         PortsStatus.Text = $"Сохранено: SOCKS5 127.0.0.1:{socks}, HTTP 127.0.0.1:{http}";
         HowToText.Text = howTo(socks, http);
         // Firefox настроен нами — его блок прокси тоже на новый порт (вступит после перезапуска Firefox).
@@ -708,6 +712,17 @@ public partial class MainWindow : Window
         FirefoxStatus.Text = FirefoxSetup.statusText(ctx, socks, http);
         // Работающий туннель слушает старые порты → переподнять тот же сервер на новых.
         if (reconnectCurrent("смена портов")) PortsStatus.Text += " · прокси перезапущен на новых портах";
+    }
+
+    private void OnDarkTheme(object sender, RoutedEventArgs e)
+    {
+        WinSettingsStore.update(ctx, WinSettingsStore.current() with { darkTheme = DarkTheme.IsChecked == true });
+        WinTheme.apply();
+        applyTheme();
+        // Строки и журнал берут цвета из палитры при построении: сами они не перекрасятся.
+        foreach (var r in liveRows.Concat(prevRows).Concat(allRows)) r.refresh();
+        JournalPanel.Tag = null;
+        loadSettings();
     }
 
     private void OnTlsFragment(object sender, RoutedEventArgs e)
@@ -739,7 +754,7 @@ public partial class MainWindow : Window
         try { r = action(); }
         catch (Exception ex) { r = new FirefoxSetup.Outcome(false, $"Не получилось: {ex.Message}"); }
         FirefoxStatus.Text = r.text;
-        FirefoxStatus.Foreground = r.ok ? Brushes.DarkGreen : Brushes.Firebrick;
+        FirefoxStatus.Foreground = r.ok ? R("OkText") : R("ErrorText");
         if (r.restartFirefox)
             MessageBox.Show(this, FirefoxSetup.RESTART_TEXT, "Перезапустите Firefox", MessageBoxButton.OK, MessageBoxImage.Information);
     }

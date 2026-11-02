@@ -145,6 +145,36 @@ jobs:
           if (-not (FindWindow $p3.Id 30)) { Shot 'dark-no-window'; throw 'window did not appear in dark theme' }
           Start-Sleep 4; Shot 'dark-theme'
           Stop-Process -Id $p3.Id -Force
+          # App switch: Windows windows stay light, the taskbar stays dark. The window must go dark at once, without a restart.
+          Start-Sleep 2
+          reg add $theme /v AppsUseLightTheme /t REG_DWORD /d 1 /f | Out-Null
+          $p4 = Start-Process $exe -PassThru
+          $w = FindWindow $p4.Id 30
+          if (-not $w) { Shot 'switch-no-window'; throw 'window did not appear before the dark switch' }
+          Start-Sleep 3; Shot 'switch-off'
+          $tabs = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, $tabCond)
+          $tabs[2].GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+          Start-Sleep 2
+          $idCond = New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, 'DarkTheme')
+          $cb = $w.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $idCond)
+          if (-not $cb) { Shot 'switch-not-found'; throw 'dark switch not found' }
+          $cb.SetFocus(); Start-Sleep 1
+          [System.Windows.Forms.SendKeys]::SendWait(' ')
+          Start-Sleep 3
+          $saved = Get-Content (Join-Path $data 'win_settings.json') -Raw -ErrorAction SilentlyContinue
+          if ($saved -notmatch '"darkTheme":\s*true') { Shot 'switch-not-saved'; throw "dark switch not saved: $saved" }
+          $n = 1
+          foreach ($t in $tabs) {
+            $t.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+            Start-Sleep 2; Shot "switch-on-$n"; $n++
+          }
+          Stop-Process -Id $p4.Id -Force
+          # The saved switch is applied at start.
+          Start-Sleep 2
+          $p5 = Start-Process $exe -PassThru
+          if (-not (FindWindow $p5.Id 30)) { Shot 'switch-restart-no-window'; throw 'window did not appear with the dark switch on' }
+          Start-Sleep 4; Shot 'switch-after-restart'
+          Stop-Process -Id $p5.Id -Force
           Copy-Item (Join-Path $data 'logs/x-gates.log') out/smoke/ -ErrorAction SilentlyContinue
 
       - name: Установщик MSI (WiX v5, на пользователя) — сборка, установка, удаление

@@ -49,6 +49,8 @@ public partial class App : Application
         new Thread(() => { while (showEvent.WaitOne()) Dispatcher.BeginInvoke(showWindow); }) { IsBackground = true, Name = "show-signal" }.Start();
 
         ctx = AppBootstrap.start(AppBootstrap.defaultDataDir());
+        WinTheme.apply();
+        WinTheme.watchDialogs();
         ui = new DispatcherUi(Dispatcher);
         tray = new Tray();
         NotificationHelper.Sink = new UiSink(tray, Dispatcher);

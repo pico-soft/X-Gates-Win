@@ -3,12 +3,12 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="X-Gates Win" Width="600" Height="645" MinWidth="460" MinHeight="500"
         Icon="pack://application:,,,/Assets/app.ico"
-        FontFamily="Segoe UI" FontSize="13" Background="White">
+        FontFamily="Segoe UI" FontSize="13" Background="{DynamicResource WindowBg}" Foreground="{DynamicResource Text}">
     <Window.Resources>
         <!-- Строка списка серверов (ServerRow Kotlin): имя + подпись · пинг и давность · скорость и давность · глаз · ▶ -->
         <DataTemplate x:Key="ServerRow">
             <Border Background="{Binding RowBg}" CornerRadius="6" Padding="8,5" Margin="0,1"
-                    BorderBrush="#14000000" BorderThickness="0,0,0,1">
+                    BorderBrush="{DynamicResource RowLine}" BorderThickness="0,0,0,1">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -19,20 +19,20 @@
                     <StackPanel Grid.Column="0" VerticalAlignment="Center" Background="Transparent" Cursor="Hand"
                                 Tag="{Binding}" MouseLeftButtonUp="OnRowDetails" ToolTip="Подробности">
                         <TextBlock Text="{Binding Title}" FontWeight="{Binding TitleWeight}" Foreground="{Binding TitleBrush}" TextWrapping="Wrap" />
-                        <TextBlock Text="{Binding Caption}" Foreground="{StaticResource Gray}" FontSize="11" TextWrapping="Wrap"
+                        <TextBlock Text="{Binding Caption}" Foreground="{DynamicResource Gray}" FontSize="11" TextWrapping="Wrap"
                                    Visibility="{Binding CaptionVisibility}" />
-                        <TextBlock Text="{Binding PingText}" Foreground="{StaticResource Gray}" FontSize="11" Visibility="{Binding PingVisibility}" />
-                        <TextBlock Text="{Binding PingAge}" Foreground="{StaticResource Gray}" FontSize="11" Visibility="{Binding PingAgeVisibility}" />
+                        <TextBlock Text="{Binding PingText}" Foreground="{DynamicResource Gray}" FontSize="11" Visibility="{Binding PingVisibility}" />
+                        <TextBlock Text="{Binding PingAge}" Foreground="{DynamicResource Gray}" FontSize="11" Visibility="{Binding PingAgeVisibility}" />
                     </StackPanel>
                     <Button Grid.Column="1" Content="{Binding EyeText}" ToolTip="{Binding EyeTip}" Click="OnToggleUse" Tag="{Binding}"
                             Background="Transparent" BorderThickness="0" Padding="6,2" Margin="4,0" VerticalAlignment="Center"
                             FontSize="11" Foreground="{Binding EyeBrush}" />
                     <StackPanel Grid.Column="2" Width="96" VerticalAlignment="Center">
                         <TextBlock Text="{Binding SpeedText}" Foreground="{Binding SpeedBrush}" FontWeight="{Binding SpeedWeight}" TextAlignment="Right" />
-                        <TextBlock Text="{Binding SpeedAge}" Foreground="{StaticResource Gray}" FontSize="11" TextAlignment="Right" Visibility="{Binding SpeedAgeVisibility}" />
+                        <TextBlock Text="{Binding SpeedAge}" Foreground="{DynamicResource Gray}" FontSize="11" TextAlignment="Right" Visibility="{Binding SpeedAgeVisibility}" />
                     </StackPanel>
                     <Button Grid.Column="3" Content="{Binding ConnectGlyph}" ToolTip="Подключиться" Click="OnConnect" Tag="{Binding}"
-                            Width="30" Height="30" Margin="8,0,0,0" Padding="0" Foreground="White" Background="{StaticResource Accent}"
+                            Width="30" Height="30" Margin="8,0,0,0" Padding="0" Foreground="White" Background="{DynamicResource AccentFill}"
                             BorderThickness="0" VerticalAlignment="Center" />
                 </Grid>
             </Border>
@@ -77,8 +77,8 @@
                         </StackPanel>
                     </Border>
                     <StackPanel x:Name="AddSubscriptionHint" Margin="0,0,0,10" Visibility="Collapsed">
-                        <TextBlock Foreground="{StaticResource Accent}" FontWeight="Bold" FontSize="15" Text="Добавьте вашу подписку" />
-                        <TextBlock Foreground="{StaticResource Gray}" TextWrapping="Wrap" Text="Вкладка «Подписки» → вставьте ссылку или URL. Без подписки список серверов пуст." />
+                        <TextBlock Foreground="{DynamicResource Accent}" FontWeight="Bold" FontSize="15" Text="Добавьте вашу подписку" />
+                        <TextBlock Foreground="{DynamicResource Gray}" TextWrapping="Wrap" Text="Вкладка «Подписки» → вставьте ссылку или URL. Без подписки список серверов пуст." />
                     </StackPanel>
 
                     <!-- ПЛАШКА активного сервера (StatusBox): цвет — по скорости и факту связи -->
@@ -105,7 +105,7 @@
                     </Border>
                     <TextBlock x:Name="ModeLine" Style="{StaticResource Link}" MouseLeftButtonUp="OnModeLine" />
                     <TextBlock x:Name="StopWordsLine" Style="{StaticResource Link}" MouseLeftButtonUp="OnStopWords" />
-                    <Border x:Name="WhiteListBanner" Background="#FFF3E0" CornerRadius="8" Padding="10" Margin="0,6" Visibility="Collapsed">
+                    <Border x:Name="WhiteListBanner" Background="{DynamicResource WarnBg}" CornerRadius="8" Padding="10" Margin="0,6" Visibility="Collapsed">
                         <DockPanel>
                             <Button DockPanel.Dock="Right" Content="Обычный режим" Click="OnWhiteListNormal" />
                             <TextBlock TextWrapping="Wrap" VerticalAlignment="Center" Text="Включены «Белые списки»: рабочих серверов не было — подключены серверы белого списка." />
@@ -114,34 +114,34 @@
 
                     <!-- ДЕЙСТВИЯ (ActionsBar) -->
                     <WrapPanel Margin="0,10,0,4">
-                        <Button x:Name="FastestButton" Style="{StaticResource Primary}" Click="OnFastest" Content="▶  Самый быстрый" />
+                        <Button x:Name="FastestButton" Style="{DynamicResource Primary}" Click="OnFastest" Content="▶  Самый быстрый" />
                         <Button x:Name="StopButton" Click="OnStop" Content="■  Стоп" VerticalAlignment="Center" />
                     </WrapPanel>
                     <ProgressBar x:Name="TestBar" Height="4" Margin="0,4,0,0" Visibility="Collapsed" Maximum="1" />
-                    <TextBlock x:Name="TestPhase" Foreground="{StaticResource Gray}" TextWrapping="Wrap" />
+                    <TextBlock x:Name="TestPhase" Foreground="{DynamicResource Gray}" TextWrapping="Wrap" />
                     <TextBlock x:Name="SubStatus" FontSize="12" TextWrapping="Wrap" />
 
                     <!-- ЖИВЫЕ -->
-                    <Border Background="{StaticResource LiveBg}" CornerRadius="10" Padding="8" Margin="0,12,0,0">
+                    <Border Background="{DynamicResource LiveBg}" CornerRadius="10" Padding="8" Margin="0,12,0,0">
                         <StackPanel>
                             <TextBlock x:Name="LiveHeader" FontWeight="Bold" FontSize="15" Margin="4,0,0,4" />
-                            <TextBlock x:Name="HiddenNote" Foreground="{StaticResource Gray}" FontSize="12" Margin="4,0" TextWrapping="Wrap" />
-                            <TextBlock x:Name="NoProtocolsNote" Foreground="#C62828" FontSize="12" Margin="4,0" TextWrapping="Wrap" Visibility="Collapsed"
+                            <TextBlock x:Name="HiddenNote" Foreground="{DynamicResource Gray}" FontSize="12" Margin="4,0" TextWrapping="Wrap" />
+                            <TextBlock x:Name="NoProtocolsNote" Foreground="{DynamicResource ErrorText}" FontSize="12" Margin="4,0" TextWrapping="Wrap" Visibility="Collapsed"
                                        Text="Все протоколы выключены в настройках — список пуст. Включите хотя бы один протокол." />
                             <TextBlock x:Name="HiddenLiveNote" Foreground="#E8710A" FontSize="12" FontWeight="Bold" Margin="4,0" TextWrapping="Wrap" Visibility="Collapsed"
                                        Cursor="Hand" MouseLeftButtonUp="OnShowHiddenProtocols" />
                             <ItemsControl x:Name="LiveList" ItemTemplate="{StaticResource ServerRow}" />
-                            <TextBlock x:Name="LiveEmpty" Foreground="{StaticResource Gray}" Margin="4,6" TextWrapping="Wrap" />
+                            <TextBlock x:Name="LiveEmpty" Foreground="{DynamicResource Gray}" Margin="4,6" TextWrapping="Wrap" />
                         </StackPanel>
                     </Border>
                     <!-- РАНЕЕ ИЗМЕРЕННЫЕ (развёрнуто по умолчанию) -->
-                    <Border x:Name="PrevBox" Background="{StaticResource PrevBg}" CornerRadius="10" Padding="8" Margin="0,12,0,0">
+                    <Border x:Name="PrevBox" Background="{DynamicResource PrevBg}" CornerRadius="10" Padding="8" Margin="0,12,0,0">
                         <Expander x:Name="PrevExpander" IsExpanded="True" FontWeight="Bold" FontSize="15" Expanded="OnAllExpanded">
                             <ItemsControl x:Name="PrevList" ItemTemplate="{StaticResource ServerRow}" FontWeight="Normal" FontSize="13" />
                         </Expander>
                     </Border>
                     <!-- ВСЕ СЕРВЕРЫ (свёрнуто; список строится только при раскрытии — их бывают тысячи) -->
-                    <Border Background="{StaticResource AllBg}" CornerRadius="10" Padding="8" Margin="0,12,0,14">
+                    <Border Background="{DynamicResource AllBg}" CornerRadius="10" Padding="8" Margin="0,12,0,14">
                         <Expander x:Name="AllExpander" IsExpanded="False" FontWeight="Bold" FontSize="15"
                                   Expanded="OnAllExpanded" Collapsed="OnAllCollapsed">
                             <ListBox x:Name="AllList" ItemTemplate="{StaticResource ServerRow}" MaxHeight="640" FontWeight="Normal" FontSize="13"
@@ -158,12 +158,12 @@
         <TabItem Header="  Подписки  ">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel Margin="14,10">
-                    <Border x:Name="SeedCard" Background="#E3F2FD" CornerRadius="10" Padding="12" Margin="0,0,0,10" Visibility="Collapsed">
+                    <Border x:Name="SeedCard" Background="{DynamicResource InfoBg}" CornerRadius="10" Padding="12" Margin="0,0,0,10" Visibility="Collapsed">
                         <StackPanel>
                             <TextBlock FontWeight="Bold" Text="Рекомендуемый список серверов не загрузился" />
                             <TextBlock x:Name="SeedError" TextWrapping="Wrap" Margin="0,4" />
                             <Button x:Name="SeedRetry" Content="Повторить" Click="OnSeedRetry" HorizontalAlignment="Left" Margin="0,4" />
-                            <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Gray}"
+                            <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource Gray}"
                                        Text="Или вставьте конфигурацию текстом ниже (поле «Вставить ссылки текстом») — её можно принести из мессенджера или от другого устройства. Это единственный способ начать в заблокированной сети." />
                         </StackPanel>
                     </Border>
@@ -175,7 +175,7 @@
                     <ItemsControl x:Name="SourcesList">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border BorderBrush="#22000000" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,8">
+                                <Border BorderBrush="{DynamicResource CardLine}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,8">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
@@ -187,23 +187,23 @@
                                         <StackPanel Grid.Column="1">
                                             <TextBlock Text="{Binding Name}" ToolTip="{Binding Url}" FontWeight="Bold" TextWrapping="Wrap" />
                                             <TextBlock Text="{Binding Summary}" FontSize="12" TextWrapping="Wrap" />
-                                            <TextBlock Text="{Binding Problem}" ToolTip="{Binding ProblemTip}" Foreground="#C62828" FontSize="12" TextWrapping="Wrap" Visibility="{Binding ProblemVisibility}" />
+                                            <TextBlock Text="{Binding Problem}" ToolTip="{Binding ProblemTip}" Foreground="{DynamicResource ErrorText}" FontSize="12" TextWrapping="Wrap" Visibility="{Binding ProblemVisibility}" />
                                         </StackPanel>
                                         <StackPanel Grid.Column="2" VerticalAlignment="Top">
                                             <Button Content="Имя…" Click="OnSourceRename" Tag="{Binding}" Padding="8,2" Margin="0,0,0,4" />
-                                            <Button Content="Удалить" Click="OnSourceDelete" Tag="{Binding}" Padding="8,2" Margin="0" Foreground="#C62828" />
+                                            <Button Content="Удалить" Click="OnSourceDelete" Tag="{Binding}" Padding="8,2" Margin="0" Foreground="{DynamicResource ErrorText}" />
                                         </StackPanel>
                                     </Grid>
                                 </Border>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <TextBlock x:Name="NoSources" Text="Подписок пока нет." Foreground="{StaticResource Gray}" Visibility="Collapsed" />
+                    <TextBlock x:Name="NoSources" Text="Подписок пока нет." Foreground="{DynamicResource Gray}" Visibility="Collapsed" />
 
                     <TextBlock Style="{StaticResource Section}" Text="Добавить подписку" />
-                    <TextBlock Text="Адрес подписки" Foreground="{StaticResource Gray}" />
+                    <TextBlock Text="Адрес подписки" Foreground="{DynamicResource Gray}" />
                     <TextBox x:Name="NewUrl" Margin="0,0,0,6" ToolTip="https://…" />
-                    <TextBlock Text="Название (можно не заполнять)" Foreground="{StaticResource Gray}" />
+                    <TextBlock Text="Название (можно не заполнять)" Foreground="{DynamicResource Gray}" />
                     <TextBox x:Name="NewName" Margin="0,0,0,6" />
                     <Button Content="Добавить и обновить" Click="OnAddUrl" HorizontalAlignment="Left" />
 
@@ -232,7 +232,7 @@
                     <TextBlock x:Name="UpdatePhase" TextWrapping="Wrap" Margin="0,4" FontWeight="Bold" />
 
                     <TextBlock Style="{StaticResource Section}" Text="Локальный прокси" />
-                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Gray}"
+                    <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource Gray}"
                                Text="Приложение НЕ меняет системный прокси Windows. Укажите адрес в браузере/программе вручную (или через расширение браузера)." />
                     <Grid Margin="0,8,0,0">
                         <Grid.ColumnDefinitions>
@@ -246,8 +246,8 @@
                         <Grid.RowDefinitions>
                             <RowDefinition /><RowDefinition /><RowDefinition />
                         </Grid.RowDefinitions>
-                        <TextBlock Grid.Row="0" Grid.Column="1" Text="Адрес" Foreground="{StaticResource Gray}" Margin="0,0,0,2" />
-                        <TextBlock Grid.Row="0" Grid.Column="3" Text="Порт" Foreground="{StaticResource Gray}" Margin="0,0,0,2" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="Адрес" Foreground="{DynamicResource Gray}" Margin="0,0,0,2" />
+                        <TextBlock Grid.Row="0" Grid.Column="3" Text="Порт" Foreground="{DynamicResource Gray}" Margin="0,0,0,2" />
                         <TextBlock Grid.Row="1" Text="SOCKS5" VerticalAlignment="Center" Margin="0,0,12,4" />
                         <TextBlock Grid.Row="1" Grid.Column="1" Text="127.0.0.1" VerticalAlignment="Center" Margin="0,0,0,4" />
                         <Button Grid.Row="1" Grid.Column="2" Content="Копировать" Click="OnCopyAddress" Margin="8,0,16,4" Padding="8,1" />
@@ -270,7 +270,7 @@
                         <Button Content="Настроить Firefox" Click="OnFirefoxSetup" />
                         <Button Content="Вернуть как было" Click="OnFirefoxRestore" />
                     </WrapPanel>
-                    <TextBlock x:Name="FirefoxStatus" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{StaticResource Gray}" />
+                    <TextBlock x:Name="FirefoxStatus" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{DynamicResource Gray}" />
 
                     <!-- Как в Android (BrowserSetupSection): сервер и порт копируются отдельно и видны сразу. -->
                     <TextBlock Style="{StaticResource Section}" Margin="0,10,0,6" Text="Telegram" />
@@ -293,7 +293,7 @@
                         <TextBlock Grid.Row="1" Grid.Column="1" x:Name="TelegramPort" VerticalAlignment="Center" />
                         <Button Grid.Row="1" Grid.Column="2" Content="Копировать" Click="OnCopySocks" Margin="8,0,0,0" Padding="8,1" />
                     </Grid>
-                    <TextBlock Foreground="{StaticResource Gray}" Margin="0,4,0,0" Text="Логин и пароль оставьте пустыми." />
+                    <TextBlock Foreground="{DynamicResource Gray}" Margin="0,4,0,0" Text="Логин и пароль оставьте пустыми." />
                     <!-- Как направить программы в наш прокси (аналог BrowserSetupSection Android). Системный прокси НЕ трогаем. -->
                     <Expander Header="Как подключить другие программы" Margin="0,8,0,0" FontWeight="Bold">
                         <TextBox x:Name="HowToText" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent"
@@ -303,9 +303,12 @@
                     <TextBlock Style="{StaticResource Section}" Text="Запуск" />
                     <CheckBox x:Name="LaunchAtLogin" Content="Запускать при входе в Windows (в трее, с последним сервером)" Click="OnLaunchAtLogin" Margin="0,2" />
 
+                    <TextBlock Style="{StaticResource Section}" Text="Оформление" />
+                    <CheckBox x:Name="DarkTheme" Content="Тёмная тема" Click="OnDarkTheme" Margin="0,2" />
+
                     <TextBlock Style="{StaticResource Section}" Text="Обход блокировок" />
                     <CheckBox x:Name="TlsFragment" Content="Дробить начало TLS-соединения на части" Click="OnTlsFragment" Margin="0,2" />
-                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Gray}"
+                    <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource Gray}"
                                Text="Включайте, если серверы перестали подключаться: помогает, когда блокируют по имени сайта в начале соединения. Подключение и замеры станут чуть медленнее (примерно на 0,15 с)." />
                     <TextBlock x:Name="TlsFragmentStatus" TextWrapping="Wrap" Margin="0,4,0,0" />
 
@@ -317,7 +320,7 @@
                     <Button Content="Сбросить настройки к значениям по умолчанию" Click="OnResetSettings" HorizontalAlignment="Left" Margin="0,8,0,0" />
 
                     <TextBlock Style="{StaticResource Section}" Text="Автомониторинг" />
-                    <TextBlock x:Name="HeartbeatLine" Foreground="{StaticResource Accent}" FontSize="12" TextWrapping="Wrap" />
+                    <TextBlock x:Name="HeartbeatLine" Foreground="{DynamicResource Accent}" FontSize="12" TextWrapping="Wrap" />
                     <TextBlock FontWeight="Bold" Margin="0,10,0,4" Text="Периодический перемер и проверки" />
                     <StackPanel x:Name="OptimizePanel" />
                     <DockPanel Margin="0,8,0,4">
@@ -336,7 +339,7 @@
                     </WrapPanel>
 
                     <TextBlock Style="{StaticResource Section}" Text="Стоп-лист" />
-                    <TextBlock Foreground="{StaticResource Gray}" TextWrapping="Wrap" Text="Слово (часть имени) скрывает совпавшие серверы. Регистр не важен." />
+                    <TextBlock Foreground="{DynamicResource Gray}" TextWrapping="Wrap" Text="Слово (часть имени) скрывает совпавшие серверы. Регистр не важен." />
                     <WrapPanel x:Name="WordsPanel" Margin="0,6,0,0" />
                     <DockPanel Margin="0,4,0,0">
                         <Button DockPanel.Dock="Right" Content="+" Click="OnAddWord" Margin="6,0,0,0" Padding="12,2" />
