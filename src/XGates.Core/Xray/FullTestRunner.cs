@@ -40,6 +40,10 @@ public static class FullTestRunner
     private static readonly TimeSpan RACE_WAIT = TimeSpan.FromSeconds(60);
     private const long RACE_CONNECT_WAIT_MS = 8_000L;
 
+    /// <summary>Замеры этапов 2 и 3 (подменяются в тестах: стенд не даёт разной скорости).</summary>
+    internal static Func<Context, ServerProfile, double> measureQuick = (c, p) => ServerSpeedTester.measureSpeedMinimal(c, p);
+    internal static Func<Context, ServerProfile, double> measureExact = (c, p) => ServerSpeedTester.measureSpeed(c, p);
+
     public sealed record Result(
         ServerProfile? connected,   // к чему подключены в итоге
         ServerProfile? fastest,     // самый быстрый по замеру
@@ -213,7 +217,7 @@ public static class FullTestRunner
                         // (≥ порога) → ИНКУМБЕНТ (Пр.90 «держать лучший ×N»); иначе — честный текст + прежний ранний коннект.
                         var activeProfile = allServers.FirstOrDefault(it => key(it) == activeServerKey);
                         var activeMbps = activeProfile != null && !Volatile.Read(ref cancelled)
-                            ? ServerSpeedTester.measureSpeed(appCtx, activeProfile) : -1.0;
+                            ? measureExact(appCtx, activeProfile) : -1.0;
                         if (activeProfile != null && activeMbps > 0.0) onSpeedResult(activeProfile, activeMbps, true);   // measureSpeed — полный; в «Живые»
                         beat();
                         // Находка порта №8: активный, поставленный на паузу («Не использовать»), НЕ инкумбент — иначе
@@ -250,7 +254,7 @@ public static class FullTestRunner
                         // Активный уже измерен ПОЛНЫМ выше — минимально не перемеряем (число не затирается на «≈»); не в счёт.
                         if (activeServerKey != null && key(p) == activeServerKey) continue;
                         // МИНИМАЛЬНЫЙ замер (~100 КБ, 1 пробник/3с — быстро падает на мёртвых). От лучшего пинга к худшему.
-                        var mbps = ServerSpeedTester.measureSpeedMinimal(appCtx, p);
+                        var mbps = measureQuick(appCtx, p);
                         minimalByKey[key(p)] = mbps;
                         if (Volatile.Read(ref cancelled)) break;   // Промпт 103: сторож/отмена сработали во время замера — не действуем по нему
                         measured++;
@@ -287,9 +291,11 @@ public static class FullTestRunner
                         {
                             if (Volatile.Read(ref cancelled)) break;
                             if ((JavaSystem.nanoTime() - phaseStart) / 1_000_000 > budgetMs) break;
-                            var full = ServerSpeedTester.measureSpeed(appCtx, p);   // ПОЛНЫЙ/точный замер
+                            var full = measureExact(appCtx, p);   // ПОЛНЫЙ/точный замер
                             if (Volatile.Read(ref cancelled)) break;
                             onSpeedResult(p, full, true);
+                            // Точное сравниваем с точным: быстрый замер в 100 КБ завышает (журнал Elyor 2026-11-02: оценка ≈53 у медленного сервера перекрыла быстрые).
+                            if (connected != null && key(p) == key(connected)) connectedSpeed = Math.Max(full, 0.0);
                             if (full > bestFull) { bestFull = full; bestFullP = p; }
                             if (full > bestSpeed) { bestSpeed = full; best = p; Volatile.Write(ref hbBest, p); }
                             beat();
@@ -306,6 +312,8 @@ public static class FullTestRunner
                             connected = pick; connectedSpeed = bestFull; Volatile.Write(ref hbConnected, pick);
                             connect(pick);
                         }
+                        else if (pick != null)
+                            MonitorLog.@event(appCtx, "monitor", "Полный тест: смены нет", $"подключённый {fmt(connectedSpeed)}, лучший {fmt(bestFull)} Мбит/с");
                     }
                 }
                 catch (Exception e)

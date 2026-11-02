@@ -203,6 +203,42 @@ public sealed class ServiceAndFullTestIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void FullTest_compares_exact_speed_with_exact_speed()
+    {
+        // Журнал Elyor 2026-11-02: короткий замер дал первому рабочему ≈53, и точные замеры остальных сравнивались с этой оценкой.
+        var servers = ImportServers(net.StartVlessServer(), net.StartVlessServer(), net.StartVlessServer());
+        string? firstQuick = null;
+        var (savedQuick, savedExact) = (FullTestRunner.measureQuick, FullTestRunner.measureExact);
+        FullTestRunner.measureQuick = (_, p) => { firstQuick ??= p.remarks; return p.remarks == firstQuick ? 50.0 : 2.0; };
+        // До быстрых замеров мерится только сервер, подключённый гонкой: он медленный, как Germany в журнале.
+        FullTestRunner.measureExact = (_, p) => firstQuick == null ? 0.1 : p.remarks == firstQuick ? 3.0 : 30.0;
+        FullTestRunner.Result? result = null;
+        var connected = new List<string>();
+        using var fin = new ManualResetEventSlim();
+        try
+        {
+            FullTestRunner.run(ctx, servers,
+                onPhase: _ => { },
+                connect: p =>
+                {
+                    lock (connected) connected.Add(p.remarks);
+                    XrayProxyService.start(ctx, XrayConfigBuilder.build(p), ServerLabels.full(p), SubscriptionManager.serverKey(p));
+                },
+                onDone: r => { result = r; fin.Set(); });
+            Assert.True(fin.Wait(120_000), "полный тест не завершился");
+        }
+        finally
+        {
+            (FullTestRunner.measureQuick, FullTestRunner.measureExact) = (savedQuick, savedExact);
+            WaitUntil(() => ProxyState.state.value.running, 10_000);   // ядро ещё поднимается: остановка раньше оставила бы порты занятыми
+            XrayProxyService.stop(ctx);
+            WaitUntil(() => !PortOpen(10815), 10_000);
+        }
+        Assert.NotEqual(firstQuick, result!.connected!.remarks);
+        Assert.Contains(MonitorLog.state.value, e => (e.text + e.detail).Contains("точный топ"));
+    }
+
+    [Fact]
     public void FullTest_connects_alive_and_skips_dead()
     {
         int a = net.StartVlessServer(), b = net.StartVlessServer(), dead = LocalTestNet.FreePort();
