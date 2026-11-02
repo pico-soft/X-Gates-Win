@@ -30,7 +30,8 @@ APK на этой стороне. 0001–0011 уже подготовлены п
 
 **Ожидаемое расхождение, пока Android не внёс 0012–0013:** здесь в конфиге нет `allowInsecure`, а `GoldenParityTests` убирает
 его из эталона (`WithoutAllowInsecure`); новые поля профиля пустыми не сериализуются (`JsonIgnore` в `ServerProfile`). После
-Android: переснять golden, убрать `WithoutAllowInsecure` и `JsonIgnore`. Фрагментация выключена по умолчанию и на golden не
+Android: переснять golden и убрать `WithoutAllowInsecure`. `JsonIgnore` НЕ убирать: в Android у новых полей `@EncodeDefault(NEVER)`, пустые
+поля не пишутся, файл совпадает (сообщение Android-КК 2026-11-02, в `main` Android пока не вошло: HEAD `4b0bebb`, маркер не двигаем). Фрагментация выключена по умолчанию и на golden не
 влияет. `win_settings.json` не трогать, пока не решено, где эта настройка живёт на Android.
 
 **Намеренные расхождения с Android (2026-11-01, Windows):** `FirstAliveRace` (и в лестнице восстановления) и пинг в 48 потоков, фоновая работа монитора вне цикла проверки, граница «Живых» `LiveListPrefs`,
