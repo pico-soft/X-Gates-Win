@@ -468,7 +468,7 @@ public static class NetworkMonitor
                 var activePm = -1;
                 if (curSrv0 != null)
                 {
-                    activePm = (int)ServerTester.ping(app, curSrv0, PING_LIVENESS_TIMEOUT_MS);
+                    activePm = ServerTester.isUdp(curSrv0) ? tunnelPing() : (int)ServerTester.ping(app, curSrv0, PING_LIVENESS_TIMEOUT_MS);
                     if (activePingSaveDue(fastChecksOnAc(cur), activePm, lastPingSaved, now() - lastPingSavedMs))
                     {
                         SubscriptionManager.applyPingResults(app, new Dictionary<string, int> { [curKey0!] = activePm });   // плашка/список — реальный пинг
@@ -935,6 +935,13 @@ public static class NetworkMonitor
 
     /// <summary>Короткий замер для решений «держать лучший» (подменяется в тестах: настоящий на стенде шумит).</summary>
     internal static Func<Context, ServerProfile, double, double> measureEnough = ServerSpeedTester.measureSufficiency;
+
+    /// <summary>Живость активного UDP-сервера: TCP-пинг к нему не проходит, а временное ядро каждый цикл дорого. Судим по ответу через сам туннель.</summary>
+    private static int tunnelPing()
+    {
+        var t0 = now();
+        return ExternalIpChecker.fetch() != null ? (int)(now() - t0).coerceAtLeast(1L) : -1;
+    }
 
     /// <summary>Полный замер кандидата (подменяется в тестах, как [measureEnough]).</summary>
     internal static Func<Context, ServerProfile, double> measureCandidate = (c, p) => ServerSpeedTester.measureSpeed(c, p);

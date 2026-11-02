@@ -19,9 +19,13 @@ public static class ServerTester
      * Один замер: TCP-коннект до сервера. Возвращает мс (≥1) или -1 (недостижим/таймаут/ошибка).
      * [timeoutMs] — мягкий верхний предел (из настроек), зажат в 1..6 с.
      */
+    /// <summary>Транспорт поверх UDP: TCP-коннект к такому серверу не проходит никогда, какой бы живой он ни был.</summary>
+    public static bool isUdp(ServerProfile profile) => profile.network is "kcp" or "mkcp";
+
     public static long ping(Context context, ServerProfile profile, int? timeoutMs = null)
     {
         int timeout = timeoutMs ?? SettingsStore.current().pingTimeoutMs;
+        if (isUdp(profile)) return udpPing(context, profile, timeout);
         // ТЗ Elyor (2026-10-15): tcping — TCP-коннект до host:port сервера (как «real/tcp ping» в v2rayN на ноутбуке).
         // Пингует ВСЕ URL быстро, показывает ДОСТИЖИМЫЕ серверы, НЕ виснет и НЕ переполняет пул (чистый таймаут
         // коннекта) — в отличие от прежнего gstatic-204 через ХОЛОДНЫЙ temp-инстанс (ложно падал на xhttp/reality/
@@ -49,6 +53,14 @@ public static class ServerTester
         {
             try { sock?.Dispose(); } catch (Exception) { }
         }
+    }
+
+    /// <summary>UDP-сервер проверяем настоящей передачей данных через временное ядро; в отклик входит и запуск ядра.</summary>
+    private static long udpPing(Context context, ServerProfile profile, int timeout)
+    {
+        var t0 = JavaSystem.nanoTime();
+        if (!ServerSpeedTester.probeAlive(context, profile, maxProbes: 1, timeoutMs: timeout.coerceIn(1000, 6000))) return -1L;
+        return ((JavaSystem.nanoTime() - t0) / 1_000_000).coerceAtLeast(1L);
     }
 
     /// <summary>Управление запущенным батчем.</summary>

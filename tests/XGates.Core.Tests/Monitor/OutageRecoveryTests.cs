@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 using XGates.Core.Monitor;
 using XGates.Core.Net;
 using XGates.Core.Platform;
@@ -247,6 +248,46 @@ public sealed class OutageRecoveryTests : IDisposable
             Assert.Equal(expected, ProxyState.state.value.serverKey);
         }
         finally { NetworkMonitor.measureEnough = saved; }
+    }
+
+    [Fact]
+    public void Live_udp_tunnel_is_kept_though_tcp_ping_never_answers()
+    {
+        var kcp = net.StartServer(new JsonObject
+        {
+            ["network"] = "mkcp",
+            ["kcpSettings"] = new JsonObject(),
+            ["finalmask"] = JsonNode.Parse("""{ "udp": [ { "type": "mkcp-legacy" } ] }"""),
+        });
+        var body = $"vless://{LocalTestNet.Uuid}@127.0.0.1:{kcp}?type=kcp&security=none#udp\nvless://{LocalTestNet.Uuid}@127.0.0.1:{net.StartVlessServer()}?type=tcp&security=none#tcp";
+        SubscriptionManager.init(ctx);
+        var (_, r) = SubscriptionManager.addLocalFromBody(ctx, body, "local");
+        Assert.True(r.ok, r.error);
+        var servers = SubscriptionManager.allServers(ctx);
+        var udp = servers.First(it => it.remarks == "udp");
+        var other = servers.First(it => it.remarks == "tcp");
+        SubscriptionManager.applyPingResults(ctx, new Dictionary<string, int> { [SubscriptionManager.serverKey(other)] = 20 });
+        SubscriptionManager.applySpeedResults(ctx, new Dictionary<string, double> { [SubscriptionManager.serverKey(other)] = 5.0 });
+        ExternalIpChecker.onceOverrideForTest = socks =>
+        {
+            try
+            {
+                using var s = Socks5.Connect(socks, "127.0.0.1", net.HttpPort, 3000);   // только соединение: трафик монитор засчитал бы за работу пользователя
+                return "198.51.100.1";
+            }
+            catch (Exception) { return null; }
+        };
+        Assert.True(ServerTester.ping(ctx, udp, 3000) >= 0, "настоящая проверка живого UDP-сервера");
+
+        Start(udp);
+        var key = SubscriptionManager.serverKey(udp);
+        var end = Environment.TickCount64 + 20_000;   // grace здесь 3 с: на TCP-пинге монитор ушёл бы задолго до конца
+        while (Environment.TickCount64 < end)
+        {
+            MonitorCoordinator.wake();
+            Thread.Sleep(250);
+            Assert.Equal(key, ProxyState.state.value.serverKey);
+        }
     }
 
     [Fact]
