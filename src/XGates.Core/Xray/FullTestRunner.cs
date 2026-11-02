@@ -273,7 +273,7 @@ public static class FullTestRunner
                                 connect(p);
                             }
                         }
-                        onPhase($"Проверено серверов: {measured} · рабочих: {goodOnes.Count}");
+                        onPhase($"Проверено серверов {measured} из {maxScan}, рабочих: {goodOnes.Count}");
                         emitProgress(measured, maxScan);
                         beat();   // Промпт 103: шаг прогресса — «пульс» для сторожа
                     }
