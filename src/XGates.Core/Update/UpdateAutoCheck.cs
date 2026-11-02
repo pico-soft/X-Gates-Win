@@ -34,18 +34,13 @@ public static class UpdateAutoCheck
         }, "update-cold-start");
     }
 
-    /**
-     * Шаг цикла «сервиса» (раз в час): пока прокси активен — проверить новую версию ЧЕРЕЗ уже работающий туннель, если
-     * прошли сутки; тихо при неудаче. true — проверка выполнена.
-     */
-    public static bool periodicTick(Context app, bool proxyRunning)
-    {
-        if (!proxyRunning) return false;
-        if (!UpdateStore.dueForAutoCheck(JavaSystem.currentTimeMillis())) return false;
-        return checkAndNotify(app);
-    }
+    /// <summary>
+    /// Шаг цикла «сервиса», раз в час (Elyor 2026-11-02: сообщать о новой версии). Было раз в сутки и только при работающем прокси, и новый выпуск мог
+    /// остаться незамеченным почти сутки. Запрос в несколько КБ; неудача молчит, как при запуске. true — проверка выполнена.
+    /// </summary>
+    public static bool periodicTick(Context app) => tryCheck(app);
 
-    /// <summary>Как [checkAndNotify], но ошибку не записывает: при запуске о ней молчим. true — ответ получен.</summary>
+    /// <summary>Самостоятельная проверка; ошибку не записывает: о ней молчим. true — ответ получен.</summary>
     private static bool tryCheck(Context app)
     {
         CheckReport r;
@@ -53,15 +48,6 @@ public static class UpdateAutoCheck
         if (r.result is UpdateCheckResult.Error) return false;
         UpdateStore.apply(app, r, JavaSystem.currentTimeMillis());
         UpdateNotifier.maybeNotify(app);
-        return true;
-    }
-
-    private static bool checkAndNotify(Context app)
-    {
-        CheckReport r;
-        try { r = UpdateChecker.check(app); } catch (Exception) { return false; }
-        UpdateStore.apply(app, r, JavaSystem.currentTimeMillis());
-        UpdateNotifier.maybeNotify(app);   // Промпт 93.J: уведомить, если новее (одно на версию)
         return true;
     }
 }

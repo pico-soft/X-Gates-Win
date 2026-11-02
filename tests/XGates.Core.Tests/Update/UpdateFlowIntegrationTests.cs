@@ -283,8 +283,6 @@ public sealed class UpdateFlowIntegrationTests : IDisposable
         Assert.Equal((7, "0.7 beta"), UpdateStore.bannerVersion(notifyOn: true));
         Assert.Null(UpdateStore.bannerVersion(notifyOn: false));
         Assert.Equal("Исправлено: всё", UpdateStore.availNotesFirstLine());
-        Assert.False(UpdateStore.dueForAutoCheck(1_000 + 60_000));
-        Assert.True(UpdateStore.dueForAutoCheck(1_000 + 24L * 3600 * 1000));
 
         UpdateNotifier.maybeNotify(ctx);
         UpdateNotifier.maybeNotify(ctx);
@@ -309,19 +307,15 @@ public sealed class UpdateFlowIntegrationTests : IDisposable
     }
 
     [Fact]
-    public void Periodic_check_only_while_proxy_runs_and_once_a_day()
+    public void Periodic_check_works_without_proxy_and_notifies_once_per_version()
     {
         Publish("v0.7", code: 7);
         var sink = new RecordingSink(); NotificationHelper.Sink = sink;
 
-        Assert.False(UpdateAutoCheck.periodicTick(ctx, proxyRunning: false));
-        Assert.Equal(0, UpdateStore.record.value.checkedAtMs);
-
-        Assert.True(UpdateAutoCheck.periodicTick(ctx, proxyRunning: true));
+        Assert.True(UpdateAutoCheck.periodicTick(ctx));
         Assert.Equal((7, "0.7 beta"), UpdateStore.bannerVersion(notifyOn: true));
+        Assert.True(UpdateAutoCheck.periodicTick(ctx));   // час спустя: проверка снова, а уведомление про эту версию одно
         Assert.Single(sink.shown, s => s.kind == NotificationHelper.Kind.UPDATE);
-
-        Assert.False(UpdateAutoCheck.periodicTick(ctx, proxyRunning: true));   // сутки не прошли
     }
 
     [Fact]

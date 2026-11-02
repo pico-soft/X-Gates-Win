@@ -102,15 +102,14 @@ public static class XrayProxyService
         };
         // Пр.139: сразу оценить ТЕКУЩУЮ сеть.
         EconomyNet.applyNow(app!);
-        // Промпт 93.I: пока прокси активен — раз в сутки проверять новую версию ЧЕРЕЗ уже работающий туннель
-        // (несколько КБ). Раз в час смотрим «пора ли»; dueForAutoCheck троттлит до суток. Тихо при неудаче.
+        // Раз в час проверяем новую версию (несколько КБ), чтобы сообщить о ней сразу, а не на следующие сутки.
         KThread.start(() =>
         {
             while (true)
             {
                 Thread.Sleep(60 * 60 * 1000);
                 var a = app;
-                if (a != null) UpdateAutoCheck.periodicTick(a, ProxyState.state.value.running);
+                if (a != null) UpdateAutoCheck.periodicTick(a);
             }
         }, "update-auto");
     }

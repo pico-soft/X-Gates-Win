@@ -14,7 +14,6 @@ public static class UpdateStore
     private const string TAG = "UpdateStore";
     private const string FILE = "update_check.json";
     private const string TMP = "update_check.json.tmp";
-    private const long DAY_MS = 24L * 60 * 60 * 1000;
 
     public sealed record Record
     {
@@ -104,13 +103,6 @@ public static class UpdateStore
 
     /// <summary>Пользователь отклонил (крестик полосы / установка) — снять полосу И уведомление для ЭТОЙ версии.</summary>
     public static void markDismissed(Context context) { var r = _record.value; if (r.availCode != 0) save(context, r with { dismissedCode = r.availCode }); }
-
-    /// <summary>Пора ли авто-проверить при холодном старте (не чаще раза в сутки).</summary>
-    public static bool dueForAutoCheck(long nowMs)
-    {
-        var at = _record.value.checkedAtMs;
-        return at == 0L || nowMs - at >= DAY_MS;
-    }
 
     private static string summarize(UpdateCheckResult result) => result switch
     {
