@@ -7,10 +7,10 @@
     <Deterministic>true</Deterministic>
     <Company>PICO-SOFT</Company>
     <Product>X-Gates Win</Product>
-    <Version>0.5.0</Version>
+    <Version>0.6.0</Version>
     <!-- Целое, растёт с КАЖДЫМ релизом: обновлялка сравнивает ТОЛЬКО его (как versionCode Android). -->
-    <VersionCode>5</VersionCode>
-    <VersionNameDisplay>0.5 beta</VersionNameDisplay>
+    <VersionCode>6</VersionCode>
+    <VersionNameDisplay>0.6 beta</VersionNameDisplay>
     <!-- Сборка Windows-проектов на Linux-сервере разработки (см. docs/decisions.md §13.1). -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
