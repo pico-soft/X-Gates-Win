@@ -58,8 +58,23 @@ def write_png(n, rows):
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", n, n, 8, 6, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b"")
 
 
-def main(src, dst):
+def on_dark(rows):
+    """Светлый вариант для тёмного фона: чёрное становится белым, а цвет остаётся цветом (меняется светлота, оттенок тот же)."""
+    out = []
+    for row in rows:
+        line = bytearray(row)
+        for x in range(0, len(line), 4):
+            r, g, b = line[x:x + 3]
+            shift = 255 - max(r, g, b) - min(r, g, b)
+            line[x], line[x + 1], line[x + 2] = r + shift, g + shift, b + shift
+        out.append(line)
+    return out
+
+
+def main(src, dst, invert=False):
     w, h, rows = read_png(src)
+    if invert:
+        rows = on_dark(rows)
     sizes = [16, 24, 32, 48, 64, 256]
     pngs = [write_png(n, resize(w, h, rows, n)) for n in sizes]
     out = struct.pack("<HHH", 0, 1, len(sizes)); off = 6 + 16 * len(sizes)
@@ -70,4 +85,6 @@ def main(src, dst):
 
 
 if __name__ == "__main__":
-    main(*(sys.argv[1:3] if len(sys.argv) >= 3 else ["art/xrayproxy-logo.png", "src/XGates.Win/Assets/app.ico"]))
+    # Светлый вариант: make-ico.py <логотип> src/XGates.Win/Assets/app-on-dark.ico --on-dark
+    args = [a for a in sys.argv[1:] if a != "--on-dark"]
+    main(*(args[:2] if len(args) >= 2 else ["art/xrayproxy-logo.png", "src/XGates.Win/Assets/app.ico"]), invert="--on-dark" in sys.argv)

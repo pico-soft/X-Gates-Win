@@ -42,7 +42,7 @@ public sealed class Tray : NotificationHelper.INotificationSink, IDisposable
     {
         try
         {
-            var sri = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/app.ico"));
+            var sri = System.Windows.Application.GetResourceStream(new Uri(WinTheme.taskbarDark ? WinTheme.ICON_ON_DARK : WinTheme.ICON));
             return new System.Drawing.Icon(sri!.Stream, WinForms.SystemInformation.SmallIconSize);
         }
         catch (Exception e)
@@ -51,6 +51,9 @@ public sealed class Tray : NotificationHelper.INotificationSink, IDisposable
             return System.Drawing.SystemIcons.Application;
         }
     }
+
+    /// <summary>Тема Windows сменилась: чёрный значок на тёмной панели не виден.</summary>
+    public void applyTheme() => icon.Icon = loadIcon();
 
     public void show(NotificationHelper.Kind kind, string title, string text)
     {

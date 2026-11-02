@@ -136,6 +136,15 @@ jobs:
           Start-Sleep 2; Shot "$n-reopened"
           Write-Host "XGatesWin processes: $((Get-Process XGatesWin -ErrorAction SilentlyContinue).Count)"
           Stop-Process -Id $p.Id -Force
+          # Dark theme, on the runner only: dark title bar and light icon. The app itself only reads this setting.
+          Start-Sleep 2
+          $theme = 'HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
+          reg add $theme /v AppsUseLightTheme /t REG_DWORD /d 0 /f | Out-Null
+          reg add $theme /v SystemUsesLightTheme /t REG_DWORD /d 0 /f | Out-Null
+          $p3 = Start-Process $exe -PassThru
+          if (-not (FindWindow $p3.Id 30)) { Shot 'dark-no-window'; throw 'window did not appear in dark theme' }
+          Start-Sleep 4; Shot 'dark-theme'
+          Stop-Process -Id $p3.Id -Force
           Copy-Item (Join-Path $data 'logs/x-gates.log') out/smoke/ -ErrorAction SilentlyContinue
 
       - name: Установщик MSI (WiX v5, на пользователя) — сборка, установка, удаление

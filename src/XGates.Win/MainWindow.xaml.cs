@@ -3,7 +3,9 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using XGates.App;
 using XGates.Core;
@@ -50,6 +52,7 @@ public partial class MainWindow : Window
         this.ctx = ctx; this.main = main; this.subs = subs;
         blocklist = new BlocklistModel(ctx);
         InitializeComponent();
+        SourceInitialized += (_, _) => applyTheme();
         // Перерисовка не чаще ~4 раз в секунду: тики теста идут десятками в секунду (как отдельный StateFlow бара в Kotlin).
         var ticks = 0;
         redraw = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background, (_, _) =>
@@ -93,6 +96,13 @@ public partial class MainWindow : Window
     }
 
     public void forceClose() { closing = true; redraw.Stop(); Close(); }
+
+    /// <summary>Тёмная тема Windows: тёмный заголовок и светлый значок. Заголовок не потемнел (старая Windows 10) — значок остаётся чёрным, иначе он пропал бы на светлом.</summary>
+    public void applyTheme()
+    {
+        var dark = WinTheme.setDarkTitleBar(new WindowInteropHelper(this).Handle, WinTheme.appsDark) && WinTheme.appsDark;
+        Icon = BitmapFrame.Create(new Uri(dark ? WinTheme.ICON_ON_DARK : WinTheme.ICON));
+    }
 
     public void openSettings() { Tabs.SelectedItem = SettingsTab; loadSettings(); }
 

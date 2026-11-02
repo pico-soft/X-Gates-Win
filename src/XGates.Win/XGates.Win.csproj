@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <Resource Include="Assets\app.ico" />
+    <Resource Include="Assets\app-on-dark.ico" />
   </ItemGroup>
 
   <!-- Ядро xray рядом с приложением: xray\xray.exe (+ geo-файлы). wintun.dll НЕ кладём — TUN запрещён рамками

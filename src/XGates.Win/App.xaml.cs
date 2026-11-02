@@ -58,6 +58,10 @@ public partial class App : Application
         tray.stopRequested += () => main?.onStop();
         tray.exitRequested += exitApp;
         tray.balloonClicked += kind => { showWindow(); if (kind == NotificationHelper.Kind.UPDATE) window?.openSettings(); };
+        SystemEvents.UserPreferenceChanged += (_, e) =>
+        {
+            if (e.Category == UserPreferenceCategory.General) Dispatcher.BeginInvoke(() => { tray?.applyTheme(); window?.applyTheme(); });
+        };
         UpdateFlowController.exitApp = () => Dispatcher.BeginInvoke(exitApp);
         UpdateFlowController.launchInstaller = WinInstaller.start;   // установить и открыть новую версию
 
