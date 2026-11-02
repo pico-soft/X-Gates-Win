@@ -51,7 +51,11 @@
   общие синглтоны). Ядро для тестов: `tools/xray/fetch-xray.sh`.
 - **Непроверенное на Windows** — в отдельной ветке `wip/…`, не в main. В main — только проверенное; после проверки
   разложить wip по коммитам в main.
-- **Выпуск:** MSI собирает автопрогон с main, `update.json` подписывается здесь. Релизы пока с «beta» в теге и названии,
-  но без флага GitHub pre-release: обновлялка читает `releases/latest` (`docs/decisions.md`, 2026-11-01).
+- **Выпуск** (только по слову Elyor): прочитать `HANDOFF-FROM-ANDROID.md` → в wip-ветке поднять `Version`, `VersionCode`, `VersionNameDisplay` в `Directory.Build.props`, коммит
+  `release: vX.Y beta (versionCode N)` → `gh workflow run windows.yml --ref <ветка>` → только при полностью зелёном прогоне: fast-forward `main` на этот коммит, MSI из артефакта `windows-check` этого же прогона,
+  `python3 tools/release/make-update.py --msi <msi> --notes-file <notes> --out <папка>` (подпись здесь), `gh release create vX.Y.0-beta --target <sha> --title "X-Gates Win X.Y beta" --latest --notes-file <body> <msi> update.json update.json.sig`.
+  Затем проверить без токена: `releases/latest`, скачать файлы, sha256, настоящий `UpdateChecker` одноразовым тестом с `currentVersionCode` (N-1 Available, N UpToDate), тест удалить. Красная сборка выпуска не публикуется.
+  Релизы с «beta» в теге и названии, но без флага GitHub pre-release: обновлялка читает `releases/latest` (`docs/decisions.md`, 2026-11-01).
+- **Тесты на этом сервере:** коммит только по `if` от вывода тестов. Упавший тест может оставить живой `third_party/xray/linux-64/xray run -c stdin:`: он держит 10815 и валит соседние тесты (проверка `ss -ltnp`). Системный `/usr/local/bin/xray` не трогать.
 - Телефоны (для Android-сверок) — только через `~/.local/bin/phone-adb`; нет связи → попросить Elyor
   запустить «синхронизатор» на Mac.
