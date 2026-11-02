@@ -44,6 +44,9 @@ public sealed record StatusInfo(
     double? tunnelDownMbps,
     double? tunnelUpMbps,
     long liveMeasuredAtMs,
+    double? flowDownMbps,    // сколько идёт через туннель сейчас: потребление, не скорость
+    double? flowUpMbps,
+    long flowAtMs,
     bool speedMeasuring,     // проба идёт сейчас; иначе «замеряю» на плашке было бы неправдой
     bool tunnelOk,
     bool hidden,
@@ -99,6 +102,10 @@ public sealed class MainScreenModel : IDisposable
 {
     /// <summary>Свежесть подтверждения связи для «зелёного» (Kotlin HEALTH_FRESH_MS).</summary>
     public const long HEALTH_FRESH_MS = 330_000L;
+
+    /// <summary>Число, если оно свежее (не старше [HEALTH_FRESH_MS]), иначе 0.</summary>
+    public static double freshMbps(double? mbps, long atMs, long nowMs) =>
+        mbps is > 0.0 && atMs > 0L && nowMs - atMs <= HEALTH_FRESH_MS ? mbps.Value : 0.0;
 
     private readonly Context context;
     private readonly IUiThread uiThread;
@@ -542,7 +549,7 @@ public sealed class MainScreenModel : IDisposable
                 if (down >= 1.0)
                 {
                     SubscriptionManager.applySpeedResultsTagged(context, new Dictionary<string, (double, bool)> { [curKey] = (down, true) });
-                    TunnelSpeed.setLive(down, up > 0 ? up : 0.0, JavaSystem.currentTimeMillis(), curKey);
+                    TunnelSpeed.setProbe(TunnelSpeed.snapshot().directDownMbps, down, up > 0 ? up : 0.0, JavaSystem.currentTimeMillis(), curKey);
                     TunnelHealth.ok(TunnelHealth.snapshot().ip, JavaSystem.currentTimeMillis(), curKey);
                     ui(() =>
                     {
@@ -841,7 +848,7 @@ public sealed class MainScreenModel : IDisposable
         var ipVerified = proxy.running && TunnelHealth.isConfirmedFor(proxy.serverKey, nowMs, HEALTH_FRESH_MS);
         var ipForActive = health.serverKey == proxy.serverKey ? health.ip : "";
         var ts = tunnelSpeed.serverKey == proxy.serverKey ? tunnelSpeed : new TunnelSpeed.Speed();
-        var liveTunnelFresh = (ts.tunnelDownMbps ?? 0.0) > 0.0 && ts.measuredAtMs > 0 && nowMs - ts.measuredAtMs <= HEALTH_FRESH_MS;
+        var liveTunnelFresh = freshMbps(ts.tunnelDownMbps, ts.measuredAtMs, nowMs) > 0.0 || freshMbps(ts.flowDownMbps, ts.flowAtMs, nowMs) > 0.0;
         var connConfirmed = ipVerified || liveTunnelFresh;
         var status = new StatusInfo(
             running: proxy.running, verified: connConfirmed, ipText: ipForActive, statusLine: healthLine,
@@ -853,6 +860,7 @@ public sealed class MainScreenModel : IDisposable
             pingAge: tunnelSpeed.serverKey == proxy.serverKey && tunnelSpeed.pingAtMs > 0L ? speedAgeTextMs(tunnelSpeed.pingAtMs) : "",
             uploadMbps: activeUploadMbps,
             directDownMbps: ts.directDownMbps, tunnelDownMbps: ts.tunnelDownMbps, tunnelUpMbps: ts.tunnelUpMbps,
+            flowDownMbps: ts.flowDownMbps, flowUpMbps: ts.flowUpMbps, flowAtMs: ts.flowAtMs,
             liveMeasuredAtMs: ts.measuredAtMs, speedMeasuring: TunnelSpeed.measuring.value, tunnelOk: connConfirmed, hidden: activeHidden, blocked: activeBlocked,
             problem: proxy.running && health.phase is TunnelHealth.Phase.NO_INTERNET or TunnelHealth.Phase.RECOVERING or TunnelHealth.Phase.NO_SERVERS,
             message: proxy.message, paused: proxy.paused);

@@ -141,8 +141,10 @@ public partial class MainWindow : Window
         PausedBanner.Visibility = V(st.paused);
         AddSubscriptionHint.Visibility = V(s.sourcesEmpty);
 
-        var liveFresh = (st.tunnelDownMbps ?? 0.0) > 0.0 && st.liveMeasuredAtMs > 0 && JavaSystem.currentTimeMillis() - st.liveMeasuredAtMs <= MainScreenModel.HEALTH_FRESH_MS;
-        var colorSpeed = Math.Max(liveFresh ? st.tunnelDownMbps ?? 0.0 : 0.0, st.speedMbps ?? 0.0);
+        var nowMs = JavaSystem.currentTimeMillis();
+        var flowNow = MainScreenModel.freshMbps(st.flowDownMbps, st.flowAtMs, nowMs);
+        // Поток тоже считается: сколько реально прошло, столько туннель точно тянет.
+        var colorSpeed = Math.Max(Math.Max(MainScreenModel.freshMbps(st.tunnelDownMbps, st.liveMeasuredAtMs, nowMs), flowNow), st.speedMbps ?? 0.0);
         var (bg, fg) = PlateColors.of(st.running, st.problem, st.verified, colorSpeed);
         StatusBox.Background = B(bg);
         var fgB = B(fg);
@@ -151,11 +153,13 @@ public partial class MainWindow : Window
         StatusTitle.Text = st.running ? "● " + (st.serverNumber > 0 ? $"№{st.serverNumber} · " : "") + (st.serverName ?? "Активен") : "○ Не запущен";
         var tunnelOk = st.running && st.tunnelOk;
         StatusDirect.Visibility = V(tunnelOk);
-        StatusTunnel.Visibility = V(tunnelOk);
+        StatusFlow.Text = $"Сейчас идёт: ↓{r1(st.flowDownMbps ?? 0.0)} / ↑{r1(st.flowUpMbps ?? 0.0)} Мбит/с";
+        StatusFlow.Visibility = V(tunnelOk && flowNow > 0.0);
         if (tunnelOk)
         {
             StatusDirect.Text = $"Напрямую: ↓{(st.directDownMbps is >= 0 ? r1(st.directDownMbps.Value) : "—")} Мбит/с";
-            if (st.liveMeasuredAtMs <= 0L) StatusTunnel.Text = st.speedMeasuring ? "замеряю скорость…" : "скорость ещё не измерена";
+            // Замера ещё нет, а трафик идёт: скорость не выдумываем, остаётся строка «Сейчас идёт».
+            if (st.liveMeasuredAtMs <= 0L) StatusTunnel.Text = st.speedMeasuring ? "замеряю скорость…" : flowNow > 0.0 ? "" : "скорость ещё не измерена";
             else
             {
                 var ageMin = (int)((JavaSystem.currentTimeMillis() - st.liveMeasuredAtMs) / 60_000L);
@@ -163,6 +167,7 @@ public partial class MainWindow : Window
                 StatusTunnel.Text = $"Туннель: {(st.tunnelDownMbps is >= 0 ? "↓" + r1(st.tunnelDownMbps.Value) : "↓—")} / {(st.tunnelUpMbps is >= 0 ? "↑" + r1(st.tunnelUpMbps.Value) : "↑—")} Мбит/с · {age}";
             }
         }
+        StatusTunnel.Visibility = V(tunnelOk && StatusTunnel.Text.Length > 0);
         StatusLine.Text = st.running && st.statusLine.Length > 0 ? "⚠ " + st.statusLine : "";
         StatusLine.Visibility = V(StatusLine.Text.Length > 0);
         StatusBlocked.Visibility = V(st.running && st.blocked);

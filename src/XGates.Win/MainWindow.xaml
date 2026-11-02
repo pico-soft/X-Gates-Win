@@ -87,6 +87,7 @@
                             <TextBlock x:Name="StatusTitle" FontWeight="Bold" FontSize="16" TextWrapping="Wrap" />
                             <TextBlock x:Name="StatusDirect" FontSize="12" />
                             <TextBlock x:Name="StatusTunnel" FontSize="12" />
+                            <TextBlock x:Name="StatusFlow" FontSize="12" />
                             <TextBlock x:Name="StatusLine" FontWeight="Bold" TextWrapping="Wrap" />
                             <TextBlock x:Name="StatusBlocked" FontSize="12" FontWeight="Bold" TextWrapping="Wrap"
                                        Text="⛔ Активный сервер в стоп-листе. Живое соединение НЕ разрываем — переключиться: кнопка «Самый быстрый»." />

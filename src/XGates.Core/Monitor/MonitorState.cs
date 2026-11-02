@@ -122,8 +122,7 @@ public static class TunnelSpeed
     public enum Source
     {
         NONE,   // ещё не замеряли (только подключились)
-        LIVE,   // туннель из реального трафика пользователя — бесплатно
-        PROBE,  // активная проба в простое — стоит трафика
+        PROBE,  // замер: активная проба или проверка монитора
     }
 
     public sealed record Speed(
@@ -137,7 +136,10 @@ public static class TunnelSpeed
         // ЖИВОЙ пинг активного (мс; -1/✗; null неизвестно) — монитор ставит КАЖДЫЙ цикл (через активный туннель). Плашка
         // берёт пинг ОТСЮДА, а не из сессионного pingResults (тот затеняет свежий монитора старым -1 из полного теста).
         int? pingMs = null,
-        long pingAtMs = 0L);             // wall-clock живого пинга (для «N сек/мин назад» на плашке)
+        long pingAtMs = 0L,              // wall-clock живого пинга (для «N сек/мин назад» на плашке)
+        double? flowDownMbps = null,     // СЕЙЧАС ИДЁТ ↓: потребление, а не скорость; null = тишина
+        double? flowUpMbps = null,       // СЕЙЧАС ИДЁТ ↑
+        long flowAtMs = 0L);             // wall-clock потока (0 = тишина)
 
     private static readonly MutableStateFlow<Speed> _state = new(new Speed());
     public static StateFlow<Speed> state => _state.asStateFlow();
@@ -153,7 +155,8 @@ public static class TunnelSpeed
         {
             var sameSrv = s.serverKey == serverKey;
             return new Speed(directDownMbps, tunnelDownMbps, tunnelUpMbps, nowMs, Source.PROBE, serverKey,
-                sameSrv ? s.pingMs : null, sameSrv ? s.pingAtMs : 0L);
+                sameSrv ? s.pingMs : null, sameSrv ? s.pingAtMs : 0L,
+                sameSrv ? s.flowDownMbps : null, sameSrv ? s.flowUpMbps : null, sameSrv ? s.flowAtMs : 0L);
         });
 
     /// <summary>Живой пинг активного (мс; -1 ✗; null неизвестно) + время — монитор ставит каждый цикл. Смена сервера сбрасывает прочие поля.</summary>
@@ -162,9 +165,28 @@ public static class TunnelSpeed
             ? s with { pingMs = pingMs, pingAtMs = nowMs, serverKey = serverKey }
             : new Speed(pingMs: pingMs, pingAtMs: nowMs, serverKey: serverKey));
 
-    /// <summary>Живой трафик: обновляем только ТУННЕЛЬ для сервера [serverKey], прямую сохраняем от прошлой пробы.</summary>
-    public static void setLive(double? tunnelDownMbps, double? tunnelUpMbps, long nowMs, string serverKey) =>
-        _state.update(s => s with { tunnelDownMbps = tunnelDownMbps, tunnelUpMbps = tunnelUpMbps, measuredAtMs = nowMs, source = Source.LIVE, serverKey = serverKey });
+    /// <summary>
+    /// Что идёт через туннель сейчас. Это потребление, а не скорость: страница в браузере даёт 0,7 при туннеле на 15, поэтому число замера оно
+    /// не заменяет (решение Elyor 2026-11-02). Поднимает его, только если реально прошло больше. Замера ещё не было — он остаётся пустым.
+    /// </summary>
+    public static void setFlow(double downMbps, double upMbps, long nowMs, string serverKey) =>
+        _state.update(s =>
+        {
+            var same = s.serverKey == serverKey;
+            double? down = same ? s.tunnelDownMbps : null, up = same ? s.tunnelUpMbps : null;
+            bool raiseDown = down != null && downMbps > down, raiseUp = up != null && upMbps > up;
+            return s with
+            {
+                tunnelDownMbps = raiseDown ? downMbps : down, tunnelUpMbps = raiseUp ? upMbps : up,
+                measuredAtMs = raiseDown || raiseUp ? nowMs : same ? s.measuredAtMs : 0L,
+                pingMs = same ? s.pingMs : null, pingAtMs = same ? s.pingAtMs : 0L,
+                serverKey = serverKey, flowDownMbps = downMbps, flowUpMbps = upMbps, flowAtMs = nowMs,
+            };
+        });
+
+    /// <summary>Тишина: «Сейчас идёт» убираем, замер остаётся.</summary>
+    public static void clearFlow(string serverKey) =>
+        _state.update(s => s.serverKey == serverKey && s.flowAtMs > 0L ? s with { flowDownMbps = null, flowUpMbps = null, flowAtMs = 0L } : s);
 
     /// <summary>Прокси остановлен / статус сброшен — живой скорости нет.</summary>
     public static void clear() => _state.value = new Speed();
