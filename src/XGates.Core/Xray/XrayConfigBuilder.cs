@@ -246,8 +246,11 @@ public static class XrayConfigBuilder
         {
             p.seed.IsNotBlank() ? "{ \"type\": \"mkcp-legacy\", \"settings\": { \"value\": " + j(p.seed!) + " } }" : "{ \"type\": \"mkcp-legacy\" }",
         };
-        if (p.headerType != null && KCP_HEADERS.TryGetValue(p.headerType.ToLowerInvariant(), out var header))
-            masks.Add("{ \"type\": \"mkcp-legacy\", \"settings\": { \"header\": " + j(header) + " } }");
+        if (p.headerType != null && KCP_HEADERS.TryGetValue(p.headerType.Trim().ToLowerInvariant(), out var header))
+        {
+            var domain = header == "dns" && p.hostHeader.IsNotBlank() ? ", \"value\": " + j(p.hostHeader!) : "";
+            masks.Add("{ \"type\": \"mkcp-legacy\", \"settings\": { \"header\": " + j(header) + domain + " } }");
+        }
         return "{ \"udp\": [ " + string.Join(", ", masks) + " ] }";
     }
 

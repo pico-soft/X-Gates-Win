@@ -159,6 +159,16 @@ public static class JsonConfigParser
                     headerType = k.optJSONObject("header")?.optString("type").IfBlankNull();
                     seed = k.optString("seed").IfBlankNull();
                 }
+                // Конфиг под новое ядро: те же заголовок и шифр лежат в finalmask, кладём их в те же поля профиля.
+                if (st.optJSONObject("finalmask")?.optJSONArray("udp") is { } masks)
+                    for (var i = 0; i < masks.length(); i++)
+                    {
+                        if (masks.optJSONObject(i) is not { } m || m.optString("type") != "mkcp-legacy" || m.optJSONObject("settings") is not { } set) continue;
+                        var header = set.optString("header").IfBlankNull();
+                        if (header != null) headerType = header;
+                        else seed = set.optString("value").IfBlankNull() ?? seed;
+                        if (header == "dns") hostHeader = set.optString("value").IfBlankNull() ?? hostHeader;
+                    }
                 break;
             case "tcp":
             case "raw":
