@@ -515,15 +515,26 @@ public static class ServerSpeedTester
     }
 
     /// <summary>Свободный TCP-порт от ОС (ServerSocket(0)); null если не удалось.</summary>
+    // Порты временных ядер: вне диапазона исходящих соединений и без повторов подряд. Системный порт (bind 0) приходится отпускать до запуска xray, и его успевало занять
+    // исходящее соединение: ядро падало с «bind: Only one usage…», а живой сервер выглядел мёртвым. Чем больше соединений у браузера, тем чаще.
+    private const int TEMP_PORT_FIRST = 30_500, TEMP_PORT_COUNT = 2_000;
+    private static int tempPortStep = Random.Shared.Next(TEMP_PORT_COUNT);
+
     private static int? freePort()
     {
-        try
+        for (var i = 0; i < TEMP_PORT_COUNT; i++)
         {
-            var l = new TcpListener(IPAddress.Loopback, 0);
-            l.Start();
-            try { return ((IPEndPoint)l.LocalEndpoint).Port; } finally { l.Stop(); }
+            var port = TEMP_PORT_FIRST + (int)((uint)Interlocked.Increment(ref tempPortStep) % TEMP_PORT_COUNT);
+            try
+            {
+                var l = new TcpListener(IPAddress.Loopback, port);
+                l.Start();
+                l.Stop();
+                return port;
+            }
+            catch (SocketException) { /* занят или зарезервирован системой — следующий */ }
         }
-        catch (Exception) { return null; }
+        return null;
     }
 
     /// <summary>Ждём, пока socks-порт temp-инстанса начнёт принимать (ретрай на гонку старта).</summary>
