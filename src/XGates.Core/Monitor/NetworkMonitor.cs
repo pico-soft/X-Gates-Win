@@ -109,6 +109,9 @@ public static class NetworkMonitor
     internal const long AC_CHECK_MS = 10_000L;
     internal const long AC_LIVENESS_GRACE_MS = 30_000L;
     internal const long AC_GRACE_RECHECK_MS = 10_000L;
+    // Запись пинга — это весь реестр серверов целиком: при цикле 10 с сотни КБ шесть раз в минуту. Плашка берёт пинг из TunnelSpeed,
+    // реестру хватает раза в минуту; смену живой/мёртвый пишем сразу (находка Android-КК 2026-11-02).
+    internal const long AC_PING_SAVE_MS = 60_000L;
 
     /// <summary>Частые проверки: шнур (стационарный ПК — всегда), не экономия трафика и не мобильная сеть.</summary>
     public static bool fastChecksOnAc(AppSettings s)
@@ -117,6 +120,10 @@ public static class NetworkMonitor
         try { charging = Device.isCharging(); } catch (Exception) { charging = false; }
         return charging && !s.trafficSaveMode && !EconomyNet.lastKnownMobile;
     }
+
+    /// <summary>Писать ли пинг активного в реестр: на батарее каждый цикл, на шнуре см. [AC_PING_SAVE_MS].</summary>
+    internal static bool activePingSaveDue(bool fast, int pingMs, int lastSavedPingMs, long sinceSaveMs) =>
+        !fast || (pingMs >= 0) != (lastSavedPingMs >= 0) || sinceSaveMs >= AC_PING_SAVE_MS;
 
     /// <summary>Интервал проверки ЗДОРОВОЙ связи (до лестницы «экран выключен»): на батарее — ползунок, на шнуре — 10 с.</summary>
     public static long healthyCheckMs(AppSettings s)
@@ -285,6 +292,8 @@ public static class NetworkMonitor
         var graceRecheck = false;           // Пр.150: в grace-окне перепроверяем чаще (короче интервал следующего цикла)
         var lastLivenessMeasureMs = 0L;     // адаптивный замер: когда последний раз мерили СКОРОСТЬ активного (0 = ещё ни разу)
         var lastActivePingMs = -1;          // адаптивный замер: пинг активного в прошлый раз (для детекта «скачка»)
+        var lastPingSavedMs = 0L;           // шнур: когда пинг активного последний раз писали в реестр
+        var lastPingSaved = -1;             // шнур: какой пинг тогда записали
         var lastFullCycleMs = 0L;           // дебаунс паразитных пробуждений: когда последний раз делали ДОРОГУЮ работу цикла
         var lastTopPingMs = 0L;             // фоновый рейтинг: когда последний раз пинговали ТОП (держим его живость)
         var lastTopRateMs = 0L;             // фоновый рейтинг: когда последний раз делали ПОЛНЫЙ замер топа (перестройка)
@@ -460,7 +469,11 @@ public static class NetworkMonitor
                 if (curSrv0 != null)
                 {
                     activePm = (int)ServerTester.ping(app, curSrv0, PING_LIVENESS_TIMEOUT_MS);
-                    SubscriptionManager.applyPingResults(app, new Dictionary<string, int> { [curKey0!] = activePm });   // плашка/список — реальный пинг
+                    if (activePingSaveDue(fastChecksOnAc(cur), activePm, lastPingSaved, now() - lastPingSavedMs))
+                    {
+                        SubscriptionManager.applyPingResults(app, new Dictionary<string, int> { [curKey0!] = activePm });   // плашка/список — реальный пинг
+                        lastPingSaved = activePm; lastPingSavedMs = now();
+                    }
                     if (activePm >= 0) TunnelSpeed.setPing(activePm, now(), curKey0!);                                 // живой источник для плашки
                 }
                 if (await userTrafficActive())

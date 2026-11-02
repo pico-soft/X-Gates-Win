@@ -25,6 +25,15 @@ public sealed class AcPowerChecksTests : IDisposable
 
     private readonly Xunit.Abstractions.ITestOutputHelper output;
 
+    [Theory]
+    [InlineData(false, 40, 40, 10_000L, true)]    // батарея: каждый цикл
+    [InlineData(true, 45, 40, 10_000L, false)]    // шнур: реестр не переписываем каждые 10 с
+    [InlineData(true, 45, 40, 60_000L, true)]     // шнур: раз в минуту
+    [InlineData(true, -1, 40, 10_000L, true)]     // сервер умер: список узнаёт сразу
+    [InlineData(true, 40, -1, 10_000L, true)]     // ожил: тоже сразу
+    public void Active_ping_reaches_the_registry_once_a_minute_on_ac(bool fast, int ping, int lastSaved, long sinceSave, bool due) =>
+        Assert.Equal(due, NetworkMonitor.activePingSaveDue(fast, ping, lastSaved, sinceSave));
+
     public AcPowerChecksTests(Xunit.Abstractions.ITestOutputHelper output)
     {
         this.output = output;
