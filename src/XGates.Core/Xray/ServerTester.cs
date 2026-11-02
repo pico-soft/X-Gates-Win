@@ -58,10 +58,27 @@ public static class ServerTester
     /// <summary>UDP-сервер проверяем настоящей передачей данных через временное ядро; в отклик входит и запуск ядра.</summary>
     private static long udpPing(Context context, ServerProfile profile, int timeout)
     {
-        var t0 = JavaSystem.nanoTime();
-        if (!ServerSpeedTester.probeAlive(context, profile, maxProbes: 1, timeoutMs: timeout.coerceIn(1000, 6000))) return -1L;
-        return ((JavaSystem.nanoTime() - t0) / 1_000_000).coerceAtLeast(1L);
+        udpPingSlots.Wait();   // очередь за слотом в отклик не входит
+        try
+        {
+            var t0 = JavaSystem.nanoTime();
+            if (!ServerSpeedTester.probeAlive(context, profile, maxProbes: 1, timeoutMs: timeout.coerceIn(1000, 6000))) return -1L;
+            return ((JavaSystem.nanoTime() - t0) / 1_000_000).coerceAtLeast(1L);
+        }
+        finally { udpPingSlots.Release(); }
     }
+
+    /// <summary>Потолок времени на батч. UDP-пинги идут по очереди из <see cref="UDP_PING_SLOTS"/> слотов: без их доли сторож объявил бы живые серверы мёртвыми, не дождавшись.</summary>
+    internal static long batchBudgetMs(int total, int udp, int concurrency, long perServerMs)
+    {
+        var waves = ((total + concurrency - 1) / concurrency).coerceAtLeast(1);
+        var udpWaves = (udp + UDP_PING_SLOTS - 1) / UDP_PING_SLOTS;
+        return 15_000L + (waves + udpWaves) * perServerMs;
+    }
+
+    // Каждый такой пинг поднимает отдельный xray.exe, а потоков пинга 48: подписка с десятками mKCP запускала бы столько же процессов разом.
+    internal const int UDP_PING_SLOTS = 3;
+    private static readonly SemaphoreSlim udpPingSlots = new(UDP_PING_SLOTS, UDP_PING_SLOTS);
 
     /// <summary>Управление запущенным батчем.</summary>
     public interface TestHandle
@@ -101,7 +118,8 @@ public static class ServerTester
         long lastProgressMs = JavaSystem.currentTimeMillis();
         var pool = new FixedThreadPool(conc, "ping");
 
-        foreach (var p in servers)
+        // UDP в конец: ожидая слот, он держал бы поток и задерживал обычные пинги за собой. Порядок выдачи результатов и так не гарантирован.
+        foreach (var p in servers.OrderBy(isUdp))
         {
             pool.execute(() =>
             {
@@ -142,8 +160,7 @@ public static class ServerTester
         // ВЕЧНО. Гарантия: батч ЗАВЕРШАЕТСЯ по застою (нет ни одного нового результата за stall) ИЛИ по общему
         // бюджету — недотестированные считаем мёртвыми, onFinish идёт с тем, что успели напинговать.
         var perServerMs = (long)(SettingsStore.current().pingTimeoutMs + 2_000);
-        var waves = ((total + conc - 1) / conc).coerceAtLeast(1);
-        var hardBudgetMs = 15_000L + waves * perServerMs;          // общий потолок на весь батч
+        var hardBudgetMs = batchBudgetMs(total, servers.Count(isUdp), conc, perServerMs);   // общий потолок на весь батч
         var stallLimitMs = (perServerMs * 3).coerceAtLeast(20_000L);  // нет НИ ОДНОГО нового результата столько → бросаем
         KThread.start(() =>
         {
