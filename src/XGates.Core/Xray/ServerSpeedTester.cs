@@ -188,12 +188,17 @@ public static class ServerSpeedTester
      */
     public static double measureSufficiency(Context context, ServerProfile profile, double thresholdMbps)
     {
-        var measureBudget = ((long)(thresholdMbps / 8.0 * 1_000_000.0 * 1.2)).coerceIn(256 * 1024L, 4 * 1024 * 1024L);
-        var warmupBudget = 512 * 1024L;   // короткий прогрев — точность не нужна, нужен факт «тянет порог»
-        var m = measureSpeedDetailed(context, profile, warmupMs: 400, measureMs: 1200,
-            warmupBudgetOverride: warmupBudget, measureBudgetOverride: measureBudget);
+        var m = measureSpeedDetailed(context, profile, warmupMs: SUFFICIENCY_WARMUP_MS, measureMs: SUFFICIENCY_WINDOW_MS,
+            warmupBudgetOverride: SUFFICIENCY_WARMUP_BYTES, measureBudgetOverride: sufficiencyBudgetBytes(thresholdMbps));
         return m.ok ? m.mbps : -1.0;
     }
+
+    internal const int SUFFICIENCY_WARMUP_MS = 400, SUFFICIENCY_WINDOW_MS = 1200;
+    internal const long SUFFICIENCY_WARMUP_BYTES = 512 * 1024L;   // короткий прогрев — точность не нужна, нужен факт «тянет порог»
+    internal const long MINIMAL_WARMUP_BYTES = 16 * 1024L, MINIMAL_BUDGET_BYTES = 100 * 1024L;
+
+    internal static long sufficiencyBudgetBytes(double thresholdMbps) =>
+        ((long)(thresholdMbps / 8.0 * 1_000_000.0 * 1.2)).coerceIn(256 * 1024L, 4 * 1024 * 1024L);
 
     /**
      * МИНИМАЛЬНЫЙ замер кандидата (temp-инстанс), ~100 КБ — как первая ступень активного staged. Цель: ДЁШЕВО
@@ -205,7 +210,7 @@ public static class ServerSpeedTester
         // БЫСТРЫЙ замер: только 1 пробник + короткий коннект-таймаут 3с → мёртвый сервер (tcping открыт, но прокси не
         // пропускает) отсеивается за ~3с, а не ~20-30с (4 пробника × 8с). Иначе на пуле из 269 «достижимых» Этап 2 полз.
         var m = measureSpeedDetailed(context, profile, warmupMs: 100, measureMs: 800,
-            warmupBudgetOverride: 16 * 1024L, measureBudgetOverride: 100 * 1024L,
+            warmupBudgetOverride: MINIMAL_WARMUP_BYTES, measureBudgetOverride: MINIMAL_BUDGET_BYTES,
             maxProbes: 1, connectTimeoutMs: 3_000);
         return m.ok ? m.mbps : -1.0;
     }

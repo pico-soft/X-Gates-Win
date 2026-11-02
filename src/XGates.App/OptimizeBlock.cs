@@ -1,6 +1,8 @@
 using System.Globalization;
 using XGates.Core.Compat;
+using XGates.Core.Monitor;
 using XGates.Core.Settings;
+using XGates.Core.Xray;
 
 namespace XGates.App;
 
@@ -24,13 +26,44 @@ public static class OptimizeBlock
         return Enumerable.Range(0, values.Count).MinBy(k => Math.Abs(values[k] - cur));
     }
 
-    /// <summary>Расход поддержания топа, МБ/мес: замер на ДОСТАТОЧНОСТЬ ≈ прогрев 0.5 МБ + (порог/8)×1.2 МБ.</summary>
-    public static double optimizeMbPerMonth(int optSec, int topBatch, int mix, double sufficientMbps)
+    private const double MONTH_SEC = 2_592_000.0, MIB = 1_048_576.0;
+    private const double FAST_MBPS = 10.0, SLOW_MBPS = 0.5;   // граница редкой проверки и пример скорости, при которой проверка идёт каждую минуту
+
+    /// <summary>Один замер на достаточность, МБ: бюджет самого замера. Медленный сервер упирается во время, а не в объём.</summary>
+    private static double enoughMb(double thresholdMbps, double? serverMbps = null)
+    {
+        var budget = (ServerSpeedTester.SUFFICIENCY_WARMUP_BYTES + ServerSpeedTester.sufficiencyBudgetBytes(thresholdMbps)) / MIB;
+        var sec = (ServerSpeedTester.SUFFICIENCY_WARMUP_MS + ServerSpeedTester.SUFFICIENCY_WINDOW_MS) / 1000.0;
+        return serverMbps is { } v ? Math.Min(budget, v / 8.0 * 1_000_000.0 * sec / MIB) : budget;
+    }
+
+    /// <summary>
+    /// «Держать лучший», МБ/мес, потолок. Проход идёт по расписанию монитора (тем чаще, чем медленнее активный): мерит активный и подмешанных неизмеренных.
+    /// Весь топ перемеряется, только когда устарел, то есть раз в предел давности. Настройка <paramref name="optSec"/> задаёт самую редкую проверку.
+    /// </summary>
+    public static double optimizeMbPerMonth(int optSec, int topBatch, int mix, double sufficientMbps, int topFreshSec, double? activeMbps)
     {
         if (optSec <= 0) return 0.0;
-        var cyclesPerMonth = 2_592_000.0 / optSec;
-        var perMeasureMb = 0.5 + sufficientMbps / 8.0 * 1.2;
-        return cyclesPerMonth * (topBatch + mix) * perMeasureMb;
+        var everySec = Math.Min(NetworkMonitor.upgradeCheckMs(activeMbps) / 1000.0, optSec);
+        var perMeasure = enoughMb(sufficientMbps);
+        return MONTH_SEC / everySec * (enoughMb(sufficientMbps, activeMbps) + mix * perMeasure) +
+               MONTH_SEC / Math.Max(everySec, topFreshSec) * topBatch * perMeasure;
+    }
+
+    /// <summary>
+    /// Все замеры монитора, МБ/мес: компьютер работает круглые сутки, не заблокирован, канал не упирается во время замера. Кроме «держать лучший» это
+    /// рейтинг топа (устаревшие из «Живых»), проверка активного на живость, проба для плашки в простое (прямой канал, туннель вниз и вверх), в экономии — редкий перечек.
+    /// </summary>
+    public static double backgroundMbPerMonth(AppSettings s, double? activeMbps)
+    {
+        var full = (s.speedWarmupBudgetBytes + s.activeMeasureBudgetBytes) / MIB;
+        var minimal = (ServerSpeedTester.MINIMAL_WARMUP_BYTES + ServerSpeedTester.MINIMAL_BUDGET_BYTES) / MIB;
+        var rating = MONTH_SEC / Math.Max(NetworkMonitor.TOP_RATE_CHARGING_WIFI_MS / 1000.0, s.liveFreshSec) * NetworkMonitor.rateTopTarget(s.trafficSaveMode) * (minimal + full);
+        var liveness = MONTH_SEC / (NetworkMonitor.LIVENESS_MEASURE_STABLE_MS / 1000.0) * enoughMb(Math.Max(s.degradationMinMbps, 0.1));
+        if (s.trafficSaveMode)
+            return rating + liveness + (s.economyRecheckSec > 0 ? MONTH_SEC / s.economyRecheckSec * enoughMb(s.sufficientMbps) : 0.0);
+        var plate = MONTH_SEC / Math.Max(s.liveSpeedActiveProbeSec, 10) * (2 * full + s.uploadMeasureBudgetBytes / MIB);
+        return rating + liveness + plate + optimizeMbPerMonth(s.activeOptimizeSec, s.activeTopBatch, s.topMixUnmeasured, s.sufficientMbps, s.topFreshSec, activeMbps);
     }
 
     /// <summary>Kotlin "%.1f".format — по ЯЗЫКУ системы (на русской Windows — запятая, как на телефоне).</summary>
@@ -94,12 +127,12 @@ public static class OptimizeBlock
     public const string FRESH_HINT = "Сервер с живым пингом и измеренной скоростью держится в «Живых», пока замер не старше этого окна; старее — уходит в «Ранее измеренные» (фон перемеряет их и возвращает ожившие в «Живые»).";
     public const string UPGRADE_HINT = "Чем медленнее текущий сервер, тем чаще ищем быстрее: от 10 Мбит/с раз в час, от 3 раз в 15 минут, от 1 раз в 5 минут, ниже 1 каждую минуту. Сразу после замеров — без ожидания. Настройка выше задаёт самую редкую проверку.";
     public const string TOP_HINT = "Держим актуальным ТОП быстрых. Мерим только кандидатов и по поводам: не измерян / замер старше предела давности / провал. Замер идёт на ДОСТАТОЧНОСТЬ — качаем, пока не подтвердится порог видео, и стоп (точное число не нужно). Пинг — лишь первое приближение (под DPI низкий пинг ≠ высокая скорость), поэтому подмешиваем неизмеренных. Массового замера всех НЕТ. «Бюджет точного замера» — для ручного полного теста.";
-    public const string OFF_HINT = "Перемер выключен — на замеры скорости в фоне трафик не тратится.";
+    public const string OFF_HINT = "Перемер выключен: более быстрый сервер сам не ищем. Остаются редкие проверки текущего сервера и списка.";
 
-    private static double optimizeMb(AppSettings s) => optimizeMbPerMonth(s.activeOptimizeSec, s.activeTopBatch, s.topMixUnmeasured, s.sufficientMbps);
+    private static double optimizeMb(AppSettings s, double activeMbps) => optimizeMbPerMonth(s.activeOptimizeSec, s.activeTopBatch, s.topMixUnmeasured, s.sufficientMbps, s.topFreshSec, activeMbps);
 
     public static string topCostLine(AppSettings s) =>
-        $"Расход поддержания топа: {fmtData(optimizeMb(s))} — ОЦЕНКА СВЕРХУ (замер на достаточность стоит доли полного; предохранители и свежий топ пропускают перемеры — реально меньше).";
+        $"Поддержание топа: {fmtData(optimizeMb(s, FAST_MBPS))} на быстром сервере (от {FAST_MBPS:F0} Мбит/с), {fmtData(optimizeMb(s, SLOW_MBPS))} на очень медленном (ниже 1 Мбит/с): там более быстрый ищем каждую минуту.";
 
     private static double checkMb(AppSettings s)
     {
@@ -110,6 +143,10 @@ public static class OptimizeBlock
     public static string checkCostLine(AppSettings s) =>
         $"Расход проверок: {fmtData(checkMb(s))} — копейки. Реже проверка — ДОЛЬШЕ сидишь с мёртвым туннелем, если он упадёт; поэтому её не отключаем.";
 
-    public static string totalLine(AppSettings s) =>
-        $"ИТОГО на замеры в фоне ({modeName(s)}): {(s.activeOptimizeSec > 0 ? fmtData(optimizeMb(s)) : "≈ 0 (перемер выкл — только реактивно при потере связи)")}. Проверки связи: {fmtData(checkMb(s))}. Контраст копеек и гигабайтов и объясняет, почему экономим на замерах, а на проверках — нет.";
+    public static string totalLine(AppSettings s)
+    {
+        string fast = fmtData(backgroundMbPerMonth(s, FAST_MBPS)), slow = fmtData(backgroundMbPerMonth(s, SLOW_MBPS));
+        var cost = fast == slow ? fast : $"{fast} на быстром сервере, {slow} на очень медленном";
+        return $"ИТОГО на замеры в фоне ({modeName(s)}): {cost}. Это потолок, если компьютер работает круглые сутки и не заблокирован. Сколько ушло на самом деле, видно в разделе «Трафик», строка «Тест». Проверки связи: {fmtData(checkMb(s))}.";
+    }
 }

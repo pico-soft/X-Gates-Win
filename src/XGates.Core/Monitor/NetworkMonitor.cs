@@ -154,7 +154,7 @@ public static class NetworkMonitor
     // радио каждую минуту = батарея. Живость активного оставляем на ПИНГЕ (дёшев, КБ, надёжен через свежий сокет —
     // Пр.144). ЗАМЕР СКОРОСТИ — РЕДКО и АДАПТИВНО: пинг стабилен → раз в STABLE; пинг заметно скакнул (признак смены
     // качества канала) → раз в UNSTABLE (чаще). Реальный трафик пользователя по-прежнему даёт скорость бесплатно.
-    private const long LIVENESS_MEASURE_STABLE_MS = 30 * 60_000L;   // пинг стабилен → замер раз в 30 мин
+    internal const long LIVENESS_MEASURE_STABLE_MS = 30 * 60_000L;   // пинг стабилен → замер раз в 30 мин
     private const long LIVENESS_MEASURE_UNSTABLE_MS = 3 * 60_000L;  // пинг скакнул → замер раз в 3 мин
     private const int PING_JITTER_ABS_MS = 80;         // абсолютный порог «скачка» пинга, мс
     private const int PING_JITTER_FRAC_PCT = 60;       // ИЛИ относительный: изменение > 60% прежнего
@@ -183,7 +183,7 @@ public static class NetworkMonitor
     private const long TOP_PING_BATTERY_SCREEN_MS = 10 * 60_000L; // батарея+экран вкл: пинг топа раз в 10 мин (экран выкл — не пингуем отдельно)
     // ТЗ Elyor (2026-10-15, «не 5 ГБ/сут»): реже + ОГРАНИЧЕННЫЙ рейтинг (топ-N, не все). С «только несвежие» (6ч)
     // большинство прогонов пустые; реальная работа — лишь когда топ протух. Интервалы увеличены.
-    private const long TOP_RATE_CHARGING_WIFI_MS = 30 * 60_000L;  // шнур+Wi-Fi: рейтинг топа раз в 30 мин
+    internal const long TOP_RATE_CHARGING_WIFI_MS = 30 * 60_000L;  // шнур+Wi-Fi: рейтинг топа раз в 30 мин
     private const long TOP_RATE_CHARGING_MOBILE_MS = 60 * 60_000L;// шнур+моб: раз в 60 мин
     private const long TOP_RATE_BATTERY_WIFI_MS = 60 * 60_000L;   // батарея+Wi-Fi: раз в 60 мин (батарея+моб — только по событию)
 
@@ -1576,6 +1576,8 @@ public static class NetworkMonitor
     // становятся списком 1; затем ДОБОР из оставшихся живых по пингу (без годной скорости) до targetTop. ПОЛНЫЙ точный
     // замер — топу прошедших minGate (0.5). Уже свежие по [liveFreshSec] и годные (≥ порога) — список 1, НЕ перемеряем
     // (бережём трафик). Активный НЕ трогаем (его скорость даёт live-сэмпл). Рейтинг под heavyMeasureAllowed (батарея).
+    internal static int rateTopTarget(bool trafficSave) => trafficSave ? 3 : 10;
+
     private static async Task rebuildAndRateTop(Context app, AppSettings s)
     {
         if (MonitorCoordinator.fullTestRunning) return;
@@ -1587,7 +1589,7 @@ public static class NetworkMonitor
             string key(ServerProfile p) => SubscriptionManager.serverKey(p);
             var curKey = ProxyState.state.value.serverKey;
             var minGate = 0.5;
-            var targetTop = s.trafficSaveMode ? 3 : 10;   // держим топ-N по скорости (НЕ меряем все, без ∞ на шнуре)
+            var targetTop = rateTopTarget(s.trafficSaveMode);   // держим топ-N по скорости (НЕ меряем все, без ∞ на шнуре)
             var keepThreshold = s.degradationMinMbps.coerceAtLeast(0.1);
             // СПИСОК 1 «Живые» = измеренная скорость>0 И замер СВЕЖИЙ (не старше liveFreshSec). Такой сервер только что
             // мерен — НЕ перемеряем в этом цикле. В зачёт топа идут лишь ГОДНЫЕ (≥ порога). liveFreshSec (а не topFreshSec)

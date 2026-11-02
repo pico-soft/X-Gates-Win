@@ -39,9 +39,53 @@ public class OptimizeBlockTests
         var ru = CultureInfo.GetCultureInfo("ru-RU");
         Assert.Equal("≈ 1,5 ГБ/мес", OptimizeBlock.fmtData(1536, ru));
         Assert.Equal("≈ 43 МБ/мес", OptimizeBlock.fmtData(43.2, ru));
-        // 6 ч → 120 циклов/мес × (5 + 1) × (0.5 + 8/8×1.2) = 1224 МБ
-        Assert.Equal(1224.0, OptimizeBlock.optimizeMbPerMonth(21600, 5, 1, 8.0), 6);
-        Assert.Contains("≈ 0 (перемер выкл — только реактивно при потере связи)", OptimizeBlock.totalLine(save));
+        Assert.DoesNotContain("на очень медленном", OptimizeBlock.totalLine(save));   // перемер выключен: скорость сервера на расход не влияет
         Assert.StartsWith("Расход проверок: ≈ 124 МБ/мес", OptimizeBlock.checkCostLine(D).Replace(",", "."));   // 43200 проверок × 3000 Б
+    }
+
+    // Замер на достаточность при пороге 8 Мбит/с: 512 КиБ прогрева + 1,2 МБ, в мебибайтах.
+    private const double ENOUGH = (524_288 + 1_200_000) / 1_048_576.0;
+
+    [Fact]
+    public void Top_upkeep_follows_the_monitor_schedule()
+    {
+        // От 10 Мбит/с раз в час: 720 проходов × (активный + подмешанный), весь топ раз в 6 ч: 120 × 5.
+        Assert.Equal(720 * 2 * ENOUGH + 120 * 5 * ENOUGH, OptimizeBlock.optimizeMbPerMonth(21600, 5, 1, 8.0, 21600, 12.0), 6);
+        // Ниже 1 Мбит/с каждую минуту. Медленный активный ограничен окном замера 1,6 с, кандидат может быть быстрым.
+        var active = 0.5 / 8.0 * 1_000_000.0 * 1.6 / 1_048_576.0;
+        Assert.Equal(43_200 * (active + ENOUGH) + 120 * 5 * ENOUGH, OptimizeBlock.optimizeMbPerMonth(21600, 5, 1, 8.0, 21600, 0.5), 6);
+        // Скорость не измерена: монитор проверяет как медленный.
+        Assert.True(OptimizeBlock.optimizeMbPerMonth(21600, 5, 1, 8.0, 21600, null) > 40_000.0);
+        // Настройка задаёт самую редкую проверку: 15 минут чаще часа, и топ перемеряется не чаще предела давности.
+        Assert.Equal(2880 * 2 * ENOUGH + 120 * 5 * ENOUGH, OptimizeBlock.optimizeMbPerMonth(900, 5, 1, 8.0, 21600, 12.0), 6);
+        Assert.Equal(0.0, OptimizeBlock.optimizeMbPerMonth(0, 5, 1, 8.0, 21600, 12.0));
+    }
+
+    [Fact]
+    public void Total_counts_every_background_measure()
+    {
+        var full = (D.speedWarmupBudgetBytes + D.activeMeasureBudgetBytes) / 1_048_576.0;
+        var rating = 720 * 10 * (full + 116.0 / 1024.0);                                             // «Живые» устаревают за час, топ 10
+        var liveness = 1440 * (524_288 + 300_000) / 1_048_576.0;                                     // раз в 30 мин, порог 2 Мбит/с
+        var plate = 8640 * (2 * full + D.uploadMeasureBudgetBytes / 1_048_576.0);                    // проба плашки раз в 5 мин
+        var keep = OptimizeBlock.optimizeMbPerMonth(D.activeOptimizeSec, D.activeTopBatch, D.topMixUnmeasured, D.sufficientMbps, D.topFreshSec, 12.0);
+        Assert.Equal(rating + liveness + plate + keep, OptimizeBlock.backgroundMbPerMonth(D, 12.0), 3);
+
+        // В экономии нет перемера и пробы плашки, а рейтинг и живость остаются (монитор их не отключает): ноль здесь был бы неправдой.
+        var save = D with { trafficSaveMode = true, economyEnabled = true };
+        var saveRating = 720 * 3 * (full + 116.0 / 1024.0);
+        Assert.Equal(saveRating + liveness + 180 * ENOUGH, OptimizeBlock.backgroundMbPerMonth(save, 12.0), 3);
+
+        var ru = CultureInfo.GetCultureInfo("ru-RU");
+        var previous = CultureInfo.CurrentCulture;
+        CultureInfo.CurrentCulture = ru;
+        try
+        {
+            var total = OptimizeBlock.totalLine(D);
+            Assert.Contains(OptimizeBlock.fmtData(OptimizeBlock.backgroundMbPerMonth(D, 10.0), ru) + " на быстром сервере", total);
+            Assert.Contains(OptimizeBlock.fmtData(OptimizeBlock.backgroundMbPerMonth(D, 0.5), ru) + " на очень медленном", total);
+            Assert.Contains("строка «Тест»", total);
+        }
+        finally { CultureInfo.CurrentCulture = previous; }
     }
 }
