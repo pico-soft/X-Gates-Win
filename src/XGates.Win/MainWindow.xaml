@@ -225,9 +225,7 @@
                     <TextBlock Style="{StaticResource Section}" Margin="0,0,0,6" Text="Обновления" />
                     <TextBlock x:Name="UpdateSummary" TextWrapping="Wrap" Margin="0,4" />
                     <WrapPanel>
-                        <Button x:Name="UpdateCheckButton" Content="Проверить обновление" Click="OnUpdateCheck" />
-                        <Button x:Name="UpdateInstallButton" Content="Скачать и установить" Click="OnUpdateInstall" Visibility="Collapsed" />
-                        <Button x:Name="UpdateCancelButton" Content="Отменить" Click="OnUpdateCancel" Visibility="Collapsed" />
+                        <Button x:Name="UpdateMainButton" Content="Проверить обновление" Click="OnUpdateMain" />
                         <Button Content="Подробности" Click="OnUpdateDetails" />
                     </WrapPanel>
                     <ProgressBar x:Name="UpdateBar" Height="3" Maximum="1" Margin="0,8,0,0" Visibility="Collapsed" />

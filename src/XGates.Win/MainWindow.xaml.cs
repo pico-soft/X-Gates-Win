@@ -632,6 +632,8 @@ public partial class MainWindow : Window
         NewWord.Text = "";
     }
 
+    private bool updateChecking;
+
     private static void showUpdateBar(ProgressBar bar)
     {
         var b = UpdateProgress.of(UpdateFlowController.phase.value);
@@ -646,9 +648,9 @@ public partial class MainWindow : Window
         UpdateSummary.Text = rec.checkedAtMs > 0
             ? $"{rec.summary} · {DateTimeOffset.FromUnixTimeMilliseconds(rec.checkedAtMs).ToLocalTime():dd.MM.yyyy HH:mm}"
             : "Ещё не проверялось";
-        var downloading = UpdateFlowController.phase.value is UpdateFlowController.Phase.Downloading;
-        UpdateInstallButton.Visibility = V(UpdateStore.live.value is UpdateCheckResult.Available && !downloading);
-        UpdateCancelButton.Visibility = V(downloading);
+        var button = UpdateButton.of(UpdateFlowController.phase.value, UpdateStore.live.value, updateChecking);
+        UpdateMainButton.Content = button.label;
+        UpdateMainButton.IsEnabled = button.enabled;
         showUpdateBar(UpdateBar);
         UpdatePhase.Text = UpdateFlowController.phase.value switch
         {
@@ -764,19 +766,30 @@ public partial class MainWindow : Window
         SettingsStore.update(ctx, SettingsStore.current() with { allowedProtocols = set });
     }
 
-    private void OnUpdateCheck(object sender, RoutedEventArgs e)
+    /// <summary>Одна кнопка на одном месте, как на Android: что она делает, решает [UpdateButton].</summary>
+    private void OnUpdateMain(object sender, RoutedEventArgs e)
     {
-        UpdateCheckButton.IsEnabled = false;
+        switch (UpdateButton.of(UpdateFlowController.phase.value, UpdateStore.live.value, updateChecking).action)
+        {
+            case UpdateButton.Action.INSTALL: UpdateFlowController.oneTap(ctx); break;
+            case UpdateButton.Action.CANCEL: UpdateFlowController.cancel(); break;
+            default: checkForUpdate(); break;
+        }
+    }
+
+    private void checkForUpdate()
+    {
+        updateChecking = true;
+        renderSettingsLive();
         UpdateSummary.Text = "Проверяю…";
         KThread.start(() =>
         {
             try { UpdateStore.apply(ctx, UpdateChecker.check(ctx, manual: true), JavaSystem.currentTimeMillis()); }
             catch (Exception ex) { Log.w("Settings", "проверка обновления", ex); }
-            Dispatcher.BeginInvoke(() => { UpdateCheckButton.IsEnabled = true; renderSettingsLive(); });
+            Dispatcher.BeginInvoke(() => { updateChecking = false; renderSettingsLive(); });
         }, "update-manual");
     }
-    private void OnUpdateInstall(object sender, RoutedEventArgs e) => UpdateFlowController.oneTap(ctx);
-    private void OnUpdateCancel(object sender, RoutedEventArgs e) => UpdateFlowController.cancel();
+
     private void OnUpdateDetails(object sender, RoutedEventArgs e) =>
         MessageBox.Show(this, UpdateStore.record.value.details.Length > 0 ? UpdateStore.record.value.details : "Подробностей пока нет — проверка не выполнялась.", "Проверка обновления");
 
