@@ -294,6 +294,7 @@ public static class NetworkMonitor
         var lastUserTrafficMs = now();
         var lastTunnelBytes = 0L;
         var lastSpeedSampleMs = 0L;      // живая скорость плашки: когда последний раз сэмплировали
+        string? sampledKey = null;       // чью скорость мерили: другой сервер не ждёт интервала
         var lastActiveProbeMs = 0L;      // когда последний раз делали АКТИВНУЮ пробу (в простое)
         Task? speedSample = null;        // идущий фоновый замер скорости плашки
         var lastExactAlarm = false;      // Промпт 118: последний тик поставлен ТОЧНЫМ будильником? (для лога/диагностики)
@@ -555,6 +556,8 @@ public static class NetworkMonitor
                     // ЖИВАЯ скорость плашки (гибрид): раз в цикл сэмплируем — реальный трафик даёт скорость
                     // бесплатно, иначе активная проба в простое. Держим ↓/↑ и время замера свежими.
                     // Замер идёт в фоне: внутри цикла он на десятки секунд останавливал проверку связи, и обрыв никто не замечал.
+                    // Сервер сменил сам монитор: цикл не перезапускался, и новый ждал бы интервала прежнего, до 5 минут без замера.
+                    if (curKey0 != sampledKey) { sampledKey = curKey0; lastSpeedSampleMs = 0L; Interlocked.Exchange(ref lastActiveProbeMs, 0L); }
                     if (cur.liveSpeedEnabled && now() - lastSpeedSampleMs >= SPEED_SAMPLE_MIN_GAP_MS && speedSample is not { IsCompleted: false })
                     {
                         lastSpeedSampleMs = now();

@@ -203,6 +203,39 @@ public sealed class ServiceAndFullTestIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void Server_changed_by_the_monitor_is_measured_without_waiting_for_the_old_interval()
+    {
+        var servers = ImportServers(net.StartVlessServer(), net.StartVlessServer());
+        var localUrl = $"http://127.0.0.1:{net.HttpPort}/bytes?n=30000000&slow=1";
+        var savedUpload = ServerSpeedTester.uploadFallbacks;
+        ServerSpeedTester.uploadFallbacks = [];
+        SettingsStore.update(ctx, SettingsStore.current() with { directProbeUrl = localUrl, uploadProbeUrl = $"http://127.0.0.1:{net.HttpPort}/up?slow=1" });
+        string a = SubscriptionManager.serverKey(servers[0]), b = SubscriptionManager.serverKey(servers[1]);
+        bool measured(string k) { MonitorCoordinator.wake(); var s = TunnelSpeed.snapshot(); return s.serverKey == k && (s.tunnelDownMbps ?? 0.0) > 0.0; }
+        try
+        {
+            XrayProxyService.start(ctx, XrayConfigBuilder.build(servers[0]), ServerLabels.full(servers[0]), a);
+            Assert.True(WaitUntil(() => measured(a), 40_000), $"первый сервер не измерен: {TunnelSpeed.snapshot()}");
+            // Пока идёт поиск монитора, цикл при смене сервера не перезапускается: так меняет сервер сам монитор.
+            MonitorCoordinator.monitorSearchRunning = true;
+            try
+            {
+                XrayProxyService.start(ctx, XrayConfigBuilder.build(servers[1]), ServerLabels.full(servers[1]), b, auto: true);
+                Assert.True(WaitUntil(() => ProxyState.state.value.running && ProxyState.state.value.serverKey == b, 10_000), ProxyState.state.value.message);
+            }
+            finally { MonitorCoordinator.monitorSearchRunning = false; }
+            Assert.True(WaitUntil(() => measured(b), 40_000), $"новый сервер не измерен: {TunnelSpeed.snapshot()}");
+        }
+        finally
+        {
+            ServerSpeedTester.uploadFallbacks = savedUpload;
+            SettingsStore.update(ctx, SettingsStore.current() with { directProbeUrl = SettingsStore.DEFAULTS.directProbeUrl, uploadProbeUrl = SettingsStore.DEFAULTS.uploadProbeUrl });
+            XrayProxyService.stop(ctx);
+            WaitUntil(() => !PortOpen(10815), 10_000);
+        }
+    }
+
+    [Fact]
     public void First_measure_happens_even_under_constant_traffic()
     {
         var servers = ImportServers(net.StartVlessServer());
