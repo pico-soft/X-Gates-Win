@@ -204,7 +204,7 @@ public static class XrayConfigBuilder
             case "tcp": if (p.headerType == "http") parts.Add("\"tcpSettings\": { \"header\": { \"type\": \"http\" } }"); break;
             case "xhttp": parts.Add("\"xhttpSettings\": " + xhttpBlock(p)); break;
             case "httpupgrade": parts.Add("\"httpupgradeSettings\": " + httpUpgradeBlock(p)); break;
-            case "mkcp": parts.Add("\"kcpSettings\": " + kcpBlock(p)); break;
+            case "mkcp": parts.Add("\"kcpSettings\": {}"); parts.Add("\"finalmask\": " + kcpMasks(p)); break;
         }
         if (fragmented(p)) parts.Add("\"sockopt\": { \"dialerProxy\": " + j(FRAGMENT_TAG) + " }");
         return "{ " + string.Join(", ", parts) + " }";
@@ -231,15 +231,24 @@ public static class XrayConfigBuilder
         return $$"""{ "path": {{j(p.path ?? "/")}}, "host": {{j(host)}} }""";
     }
 
-    // mkcp: тип обфускации заголовка (headerType, деф. none) + необязательный seed.
-    private static string kcpBlock(ServerProfile p)
+    // Заголовки mKCP из ссылок → имена ядра. Незнакомый тип пропускаем: иначе ядро отвергнет весь конфиг, а не один сервер.
+    private static readonly Dictionary<string, string> KCP_HEADERS = new()
     {
-        var fields = new List<string>
+        ["srtp"] = "srtp", ["utp"] = "utp", ["dtls"] = "dtls", ["wireguard"] = "wireguard", ["dns"] = "dns",
+        ["wechat-video"] = "wechat", ["wechat"] = "wechat",
+    };
+
+    // mkcp: заголовок и seed ядро с v26 принимает только как finalmask. Шифр идёт первым, заголовок вторым, а без маски вовсе нельзя: со старым
+    // сервером (ядро 25.12.8) связь есть только так, в других вариантах 0 байт, хотя ядро конфиг принимает (проверено, docs/decisions.md).
+    private static string kcpMasks(ServerProfile p)
+    {
+        var masks = new List<string>
         {
-            "\"header\": { \"type\": " + j(p.headerType.TakeIfNotBlank() ?? "none") + " }",
+            p.seed.IsNotBlank() ? "{ \"type\": \"mkcp-legacy\", \"settings\": { \"value\": " + j(p.seed!) + " } }" : "{ \"type\": \"mkcp-legacy\" }",
         };
-        if (p.seed.IsNotBlank()) fields.Add("\"seed\": " + j(p.seed!));
-        return "{ " + string.Join(", ", fields) + " }";
+        if (p.headerType != null && KCP_HEADERS.TryGetValue(p.headerType.ToLowerInvariant(), out var header))
+            masks.Add("{ \"type\": \"mkcp-legacy\", \"settings\": { \"header\": " + j(header) + " } }");
+        return "{ \"udp\": [ " + string.Join(", ", masks) + " ] }";
     }
 
     private static string tlsBlock(ServerProfile p)

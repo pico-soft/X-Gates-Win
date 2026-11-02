@@ -162,7 +162,7 @@ public sealed class LocalTestNet : IDisposable
     private static JsonArray PemLines(string pem) =>
         new(pem.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(l => (JsonNode?)JsonValue.Create(l.TrimEnd('\r'))).ToArray());
 
-    private int StartServer(JsonObject stream)
+    internal int StartServer(JsonObject stream)
     {
         int port = FreePort();
         var cfg = new JsonObject

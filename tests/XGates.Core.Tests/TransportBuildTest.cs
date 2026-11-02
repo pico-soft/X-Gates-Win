@@ -64,22 +64,33 @@ public class TransportBuildTest
         Assert.True(balanced(cfg), "json balanced");
     }
 
+    private const string KCP_LINK = "vless://11111111-1111-1111-1111-111111111111@h.example.com:2408?type=kcp&security=none";
+
     [Fact]
-    public void mkcp_builds_with_header_and_seed()
+    public void mkcp_header_and_seed_go_to_finalmask_cipher_first()
     {
-        var p = vless(
-            "vless://11111111-1111-1111-1111-111111111111@h.example.com:2408" +
-            "?type=kcp&headerType=srtp&seed=mySeed&security=none#n");
+        var p = vless(KCP_LINK + "&headerType=srtp&seed=mySeed#n");
         Assert.Equal("kcp", p.network);
         Assert.Equal("srtp", p.headerType);
         Assert.Equal("mySeed", p.seed);
         var cfg = XrayConfigBuilder.build(p);
         Assert.Contains("\"network\": \"mkcp\"", cfg);
-        Assert.Contains("\"kcpSettings\"", cfg);
-        Assert.Contains("\"type\": \"srtp\"", cfg);
-        Assert.Contains("\"seed\": \"mySeed\"", cfg);
+        Assert.Contains("\"kcpSettings\": {}", cfg);
+        Assert.Contains("\"udp\": [ { \"type\": \"mkcp-legacy\", \"settings\": { \"value\": \"mySeed\" } }, { \"type\": \"mkcp-legacy\", \"settings\": { \"header\": \"srtp\" } } ]", cfg);
+        Assert.DoesNotContain("\"seed\"", cfg);
         Assert.True(balanced(cfg), "json balanced");
     }
+
+    [Theory]
+    [InlineData("#n")]
+    [InlineData("&headerType=none#n")]
+    [InlineData("&headerType=unknown#n")]
+    public void mkcp_without_header_still_has_the_original_mask(string tail) =>
+        Assert.Contains("\"udp\": [ { \"type\": \"mkcp-legacy\" } ]", XrayConfigBuilder.build(vless(KCP_LINK + tail)));
+
+    [Fact]
+    public void mkcp_wechat_video_uses_the_core_name() =>
+        Assert.Contains("\"header\": \"wechat\"", XrayConfigBuilder.build(vless(KCP_LINK + "&headerType=wechat-video#n")));
 
     // --- фикс: мусор в security (false/auto/…) больше не валит config load «Unknown security» ---
 
