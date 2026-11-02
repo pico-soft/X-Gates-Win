@@ -52,12 +52,27 @@ public static partial class Libv2ray
         return versionCache;
     }
 
-    /// <summary>Свободный TCP-порт на петле (как ServerSocket(0) в Kotlin; гонка возможна — вызывающие повторяют).</summary>
+    // Порты временных ядер: вне диапазона исходящих соединений и без повторов подряд. Системный порт (bind 0) приходится отпускать до запуска xray, и его успевало занять
+    // исходящее соединение: ядро падало с «bind: Only one usage…», а живой сервер выглядел мёртвым. Чем больше соединений у браузера, тем чаще.
+    private const int TEMP_PORT_FIRST = 30_500, TEMP_PORT_COUNT = 2_000;
+    private static int tempPortStep = Random.Shared.Next(TEMP_PORT_COUNT);
+
+    /// <summary>Свободный TCP-порт на петле для временного ядра и его служебного API.</summary>
     internal static int freePort()
     {
-        var l = new TcpListener(IPAddress.Loopback, 0);
-        l.Start();
-        try { return ((IPEndPoint)l.LocalEndpoint).Port; } finally { l.Stop(); }
+        for (var i = 0; i < TEMP_PORT_COUNT; i++)
+        {
+            var port = TEMP_PORT_FIRST + (int)((uint)Interlocked.Increment(ref tempPortStep) % TEMP_PORT_COUNT);
+            try
+            {
+                var l = new TcpListener(IPAddress.Loopback, port);
+                l.Start();
+                l.Stop();
+                return port;
+            }
+            catch (SocketException) { /* занят или зарезервирован системой — следующий */ }
+        }
+        throw new SocketException((int)SocketError.AddressAlreadyInUse);
     }
 
     /// <summary>
