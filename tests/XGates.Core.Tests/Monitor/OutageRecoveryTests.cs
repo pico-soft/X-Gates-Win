@@ -207,13 +207,12 @@ public sealed class OutageRecoveryTests : IDisposable
         var active = servers.First(it => it.remarks == "srv0");
         Start(active);
 
-        // Текущий задан числом: короткий замер живого сервера на стенде Windows иногда даёт -1, и тогда монитор справедливо пропускает проход
-        // (прогон 41455944519: srv0=-1, повторный ok). Кандидаты мерятся по-настоящему: мёртвый порт здесь и проверяется.
+        // Все замеры настоящие: мёртвый порт здесь и проверяется. На Windows тест падал в 4 из 9 прогонов, пока не появился ThreadPoolSetup (srv0=-1, прогон 41455944519).
         var measured = new System.Collections.Concurrent.ConcurrentQueue<string>();
         var saved = NetworkMonitor.measureEnough;
         NetworkMonitor.measureEnough = (c, p, t) =>
         {
-            var m = p.remarks == "srv0" ? 5.0 : saved(c, p, t);
+            var m = saved(c, p, t);
             measured.Enqueue($"{p.remarks}={m}");
             return m;
         };
