@@ -179,9 +179,8 @@ public sealed class OutageRecoveryTests : IDisposable
         var other = servers.First(it => it.remarks == "srv1");
         SubscriptionManager.applyPingResults(ctx, servers.ToDictionary(SubscriptionManager.serverKey, _ => 20));
         SubscriptionManager.applySpeedResults(ctx, new Dictionary<string, double> { [SubscriptionManager.serverKey(other)] = 5.0 });
-        var (savedEnough, savedCandidate) = (NetworkMonitor.measureEnough, NetworkMonitor.measureCandidate);
-        NetworkMonitor.measureEnough = (_, _, _) => curMeasured;
-        NetworkMonitor.measureCandidate = (_, _) => 5.0;
+        var savedCandidate = NetworkMonitor.measureCandidate;
+        NetworkMonitor.measureCandidate = (_, p) => p.remarks == "srv0" ? curMeasured : 5.0;
         try
         {
             Start(active);
@@ -193,7 +192,7 @@ public sealed class OutageRecoveryTests : IDisposable
             Thread.Sleep(500);
             Assert.Equal(expected, ProxyState.state.value.serverKey);
         }
-        finally { (NetworkMonitor.measureEnough, NetworkMonitor.measureCandidate) = (savedEnough, savedCandidate); }
+        finally { NetworkMonitor.measureCandidate = savedCandidate; }
     }
 
     [Fact]

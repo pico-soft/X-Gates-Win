@@ -1711,12 +1711,14 @@ public static class NetworkMonitor
         MonitorLog.@event(app, "monitor", $"Туннель медленный ({fmt(passiveDown)}) — проверяю кандидатов ({ordered.Count})",
             string.Join(", ", ordered.Select(ServerLabels.display)));
         MonitorCoordinator.monitorSearchRunning = true;
+        var seen = new List<string>();
         try
         {
             foreach (var cand in ordered)
             {
                 if (ProxyState.state.value.serverKey != curKey) return;   // пользователь/лестница сменили — не вмешиваемся
                 var candMbps = measureCandidate(app, cand);               // замер temp-инстансом (активный не дёргаем)
+                seen.Add($"{ServerLabels.display(cand)} {fmt(candMbps)}");
                 SubscriptionManager.applySpeedResults(app, new Dictionary<string, double> { [SubscriptionManager.serverKey(cand)] = candMbps });
                 if (ProxyState.state.value.serverKey != curKey) return;
                 if (worthLeaving(candMbps, passiveDown, cur))
@@ -1724,7 +1726,8 @@ public static class NetworkMonitor
                     // Потребление — ещё не скорость: браузер читает страницу, а туннель тянет 15 Мбит/с. Правило Elyor — уходить, только
                     // если уверены, поэтому перед уходом меряем сам туннель. Замер не состоялся — уверенности нет, остаёмся.
                     var curProfile = SubscriptionManager.allServers(app).FirstOrDefault(it => SubscriptionManager.serverKey(it) == curKey);
-                    var curMbps = curProfile != null ? measureEnough(app, curProfile, candMbps) : -1.0;
+                    var curMbps = curProfile != null ? measureCandidate(app, curProfile) : -1.0;   // тем же замером, что кандидата: короткий на всплеске завышает
+                    seen.Add($"сам туннель {fmt(curMbps)}");
                     if (ProxyState.state.value.serverKey != curKey) return;
                     if (curMbps <= 0.0 || !worthLeaving(candMbps, Math.Max(curMbps, passiveDown), cur)) continue;
                     string cfg;
@@ -1738,7 +1741,7 @@ public static class NetworkMonitor
                 }
             }
             MonitorLog.@event(app, "monitor", "Никто из кандидатов не лучше — остаюсь",
-                $"порог {fmt(cur.degradationMinMbps)}, сейчас {fmt(passiveDown)}");
+                $"порог {fmt(cur.degradationMinMbps)}, сейчас {fmt(passiveDown)}; {string.Join(", ", seen)}");
         }
         finally
         {
