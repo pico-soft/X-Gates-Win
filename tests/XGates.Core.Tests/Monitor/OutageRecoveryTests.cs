@@ -207,12 +207,22 @@ public sealed class OutageRecoveryTests : IDisposable
         var active = servers.First(it => it.remarks == "srv0");
         Start(active);
 
-        NetworkMonitor.optimizeToFastest(ctx, SettingsStore.current()).Wait();
+        // Что мерил монитор: тест падает на Windows примерно в двух прогонах из пяти, и без этого причину не увидеть.
+        var measured = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var saved = NetworkMonitor.measureEnough;
+        NetworkMonitor.measureEnough = (c, p, t) =>
+        {
+            var m = saved(c, p, t);
+            measured.Enqueue(m > 0.0 ? $"{p.remarks}={m}" : $"{p.remarks}={m} ({ServerSpeedTester.measureSpeedDetailed(c, p).reason})");
+            return m;
+        };
+        try { NetworkMonitor.optimizeToFastest(ctx, SettingsStore.current()).Wait(); }
+        finally { NetworkMonitor.measureEnough = saved; }
 
         Assert.NotEqual(ghost, ProxyState.state.value.serverKey);
         var ghostPing = SubscriptionManager.allServers(ctx).First(it => SubscriptionManager.serverKey(it) == ghost).pingMs;
-        Assert.True(ghostPing == -1, $"пинг {ghostPing}, фаза {TunnelHealth.snapshot().phase}: " +   // ушёл из «Живых»
-            string.Join(" | ", MonitorLog.state.value.Take(10).Select(e => $"{e.text} {e.detail}")));
+        Assert.True(ghostPing == -1, $"пинг {ghostPing}, фаза {TunnelHealth.snapshot().phase}, замеры: {string.Join(", ", measured)}; журнал: " +   // ушёл из «Живых»
+            string.Join(" | ", MonitorLog.state.value.TakeLast(5).Select(e => $"{e.text} {e.detail}")));
     }
 
     [Theory]
