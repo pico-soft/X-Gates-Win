@@ -300,8 +300,12 @@ internal static class JSONStringer
 /// <summary>Порт <c>org.json.JSONTokener</c> Android.</summary>
 internal sealed class JSONTokener
 {
+    // Отличие от org.json: разбор рекурсивный, а переполнение стека в .NET не перехватывается и роняет весь процесс. Подписка — чужие
+    // данные, поэтому глубину ограничиваем. 64 — предел System.Text.Json, которым читается конфиг ядра.
+    private const int MAX_DEPTH = 64;
     private readonly string input;
     private int pos;
+    private int depth;
 
     public JSONTokener(string? input)
     {
@@ -315,8 +319,12 @@ internal sealed class JSONTokener
         switch (c)
         {
             case -1: throw SyntaxError("End of input");
-            case '{': return ReadObject();
-            case '[': return ReadArray();
+            case '{':
+            case '[':
+                if (++depth > MAX_DEPTH) throw SyntaxError("Nesting too deep");
+                object nested = c == '{' ? ReadObject() : ReadArray();
+                depth--;
+                return nested;
             case '\'':
             case '"': return NextString((char)c);
             default:
