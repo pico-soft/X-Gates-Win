@@ -103,7 +103,7 @@ public sealed record AppSettings
     // Пр.126.A: предохранители перемера (работают, когда активный интервал > 0). ОБЩИЕ для обоих режимов.
     [JsonPropertyName("monitorOptimizeWifiOnly")] public bool monitorOptimizeWifiOnly { get; init; } = true;  // не перемерять на мобильной/платной сети — только Wi-Fi
     [JsonPropertyName("monitorOptimizeIdleSkipSec")] public int monitorOptimizeIdleSkipSec { get; init; } = 1800;  // не перемерять, если через туннель давно нет трафика, с (0=не пропускать)
-    [JsonPropertyName("monitorOptimizeSkipAboveMbps")] public double monitorOptimizeSkipAboveMbps { get; init; } = 10.0;  // не перемерять, если текущий уже быстрый (≥), Мбит/с (0=не пропускать)
+    [JsonPropertyName("monitorOptimizeSkipAboveMbps")] public double monitorOptimizeSkipAboveMbps { get; init; } = 10.0;  // УСТАРЕЛО (Elyor 2026-11-02): не читается, быстрый сервер проверяется реже, см. upgradeCheckMs
     [JsonPropertyName("monitorDirectThreshold")] public double monitorDirectThreshold { get; init; } = 1.0;  // порог прямого канала, Мбит/с (эталон direct_speed_threshold)
     [JsonPropertyName("monitorTunnelThreshold")] public double monitorTunnelThreshold { get; init; } = 1.0;  // порог туннеля, Мбит/с (эталон tunnel_speed_threshold)
     // Сколько неудач ПОДРЯД считать падением. В эталоне решение за 1 цикл (счётчика нет) — наш анти-дребезг.

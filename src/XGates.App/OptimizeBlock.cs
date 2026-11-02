@@ -87,15 +87,12 @@ public static class OptimizeBlock
                 dd.monitorOptimizeWifiOnly ? "вкл" : "выкл"));
             list.Add(intRow("Не перемерять при простое дольше", "мин (0=всегда)", x => x.monitorOptimizeIdleSkipSec / 60, dd.monitorOptimizeIdleSkipSec / 60,
                 (x, v) => x with { monitorOptimizeIdleSkipSec = v * 60 }, 0, 240));
-            list.Add(new SettingRow("Перемер", "Не перемерять, если текущий быстрее", "Мбит/с (0=всегда)", SettingKind.DOUBLE,
-                x => JavaNumbers.JavaDoubleToString(x.monitorOptimizeSkipAboveMbps),
-                (x, t) => JavaNumbers.ParseJavaDouble(t.Replace(',', '.')) is double v && v >= 0.0 && v <= 1000.0 ? x with { monitorOptimizeSkipAboveMbps = v } : null,
-                JavaNumbers.JavaDoubleToString(dd.monitorOptimizeSkipAboveMbps)));
         }
         return list;
     }
 
     public const string FRESH_HINT = "Сервер с живым пингом и измеренной скоростью держится в «Живых», пока замер не старше этого окна; старее — уходит в «Ранее измеренные» (фон перемеряет их и возвращает ожившие в «Живые»).";
+    public const string UPGRADE_HINT = "Чем медленнее текущий сервер, тем чаще ищем быстрее: от 10 Мбит/с раз в час, от 3 раз в 15 минут, от 1 раз в 5 минут, ниже 1 каждую минуту. Сразу после замеров — без ожидания. Настройка выше задаёт самую редкую проверку.";
     public const string TOP_HINT = "Держим актуальным ТОП быстрых. Мерим только кандидатов и по поводам: не измерян / замер старше предела давности / провал. Замер идёт на ДОСТАТОЧНОСТЬ — качаем, пока не подтвердится порог видео, и стоп (точное число не нужно). Пинг — лишь первое приближение (под DPI низкий пинг ≠ высокая скорость), поэтому подмешиваем неизмеренных. Массового замера всех НЕТ. «Бюджет точного замера» — для ручного полного теста.";
     public const string OFF_HINT = "Перемер выключен — на замеры скорости в фоне трафик не тратится.";
 

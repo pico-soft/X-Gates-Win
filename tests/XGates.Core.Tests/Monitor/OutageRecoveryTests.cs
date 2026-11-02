@@ -249,6 +249,28 @@ public sealed class OutageRecoveryTests : IDisposable
         finally { NetworkMonitor.measureEnough = saved; }
     }
 
+    [Theory]
+    [InlineData(15.0, 60)]
+    [InlineData(10.0, 60)]
+    [InlineData(5.0, 15)]
+    [InlineData(3.0, 15)]
+    [InlineData(2.0, 5)]
+    [InlineData(1.0, 5)]
+    [InlineData(0.5, 1)]
+    [InlineData(0.0, 1)]
+    [InlineData(null, 1)]
+    public void The_slower_the_tunnel_the_more_often_we_look_for_a_faster_one(double? mbps, int minutes) =>
+        Assert.Equal(minutes * 60_000L, NetworkMonitor.upgradeCheckMs(mbps));
+
+    [Fact]
+    public void Broken_probe_means_speed_is_unknown_for_the_schedule()
+    {
+        Assert.Equal(53.0, NetworkMonitor.activeSpeedForChecks(53.0, new TunnelSpeed.Speed(serverKey: "a"), "a"));                                   // замера туннеля не было
+        Assert.Equal(2.0, NetworkMonitor.activeSpeedForChecks(53.0, new TunnelSpeed.Speed(tunnelDownMbps: 2.0, measuredAtMs: 5L, serverKey: "a"), "a"));
+        Assert.Null(NetworkMonitor.activeSpeedForChecks(53.0, new TunnelSpeed.Speed(measuredAtMs: 5L, serverKey: "a"), "a"));                        // проба оборвалась
+        Assert.Equal(53.0, NetworkMonitor.activeSpeedForChecks(53.0, new TunnelSpeed.Speed(tunnelDownMbps: 2.0, measuredAtMs: 5L, serverKey: "b"), "a"));   // чужой замер
+    }
+
     /// <summary>Активный srv0 и другие с уже свежими скоростями: мерить в топе нечего, а решение принимать надо.</summary>
     private List<ServerProfile> FreshTop(params double[] speeds)
     {
@@ -256,6 +278,39 @@ public sealed class OutageRecoveryTests : IDisposable
         SubscriptionManager.applyPingResults(ctx, servers.ToDictionary(SubscriptionManager.serverKey, _ => 20));
         SubscriptionManager.applySpeedResults(ctx, speeds.Select((v, i) => (key: SubscriptionManager.serverKey(servers.First(it => it.remarks == $"srv{i}")), v)).ToDictionary(x => x.key, x => x.v));
         return servers;
+    }
+
+    [Fact]
+    public void Faster_server_is_taken_even_when_the_whole_top_is_fresh()
+    {
+        var servers = FreshTop(1.0, 30.0);
+        var saved = NetworkMonitor.measureEnough;
+        NetworkMonitor.measureEnough = (_, p, _) => p.remarks == "srv0" ? 1.0 : 30.0;
+        try
+        {
+            Start(servers.First(it => it.remarks == "srv0"));
+            NetworkMonitor.optimizeToFastest(ctx, SettingsStore.current()).Wait();
+            var expected = SubscriptionManager.serverKey(servers.First(it => it.remarks == "srv1"));
+            Assert.True(WaitUntil(() => ProxyState.state.value.serverKey == expected && ProxyState.state.value.running, 5_000), ProxyState.state.value.serverKey);
+        }
+        finally { NetworkMonitor.measureEnough = saved; }
+    }
+
+    [Fact]
+    public void Dead_fastest_does_not_block_the_next_fastest()
+    {
+        var servers = FreshTop(1.0, 100.0, 50.0);
+        var saved = NetworkMonitor.measureEnough;
+        NetworkMonitor.measureEnough = (_, p, _) => p.remarks switch { "srv0" => 1.0, "srv1" => -1.0, _ => 50.0 };
+        try
+        {
+            Start(servers.First(it => it.remarks == "srv0"));
+            NetworkMonitor.optimizeToFastest(ctx, SettingsStore.current()).Wait();
+            var expected = SubscriptionManager.serverKey(servers.First(it => it.remarks == "srv2"));
+            Assert.True(WaitUntil(() => ProxyState.state.value.serverKey == expected && ProxyState.state.value.running, 5_000), ProxyState.state.value.serverKey);
+            Assert.Equal(-1, SubscriptionManager.allServers(ctx).First(it => it.remarks == "srv1").pingMs);
+        }
+        finally { NetworkMonitor.measureEnough = saved; }
     }
 
     [Fact]

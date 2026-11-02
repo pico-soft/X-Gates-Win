@@ -66,6 +66,19 @@ public static class NetworkMonitor
     // «держать лучший» — чтобы вскоре перейти на самый быстрый стабильный, не ждя обычные 6 ч.
     private const long POST_SWITCH_OPTIMIZE_MS = 90_000L;
 
+    /// <summary>Как часто пробовать перейти на более быстрый сервер (правило Elyor 2026-11-02): чем медленнее активный, тем чаще.</summary>
+    internal static long upgradeCheckMs(double? activeMbps) => activeMbps switch
+    {
+        >= 10.0 => 60 * 60_000L,
+        >= 3.0 => 15 * 60_000L,
+        >= 1.0 => 5 * 60_000L,
+        _ => 60_000L,
+    };
+
+    /// <summary>Скорость активного для расписания: последний замер этого сервера. Проба оборвалась — скорость неизвестна, проверяем как медленный.</summary>
+    internal static double? activeSpeedForChecks(double? stored, TunnelSpeed.Speed ts, string key) =>
+        ts.serverKey == key && ts.measuredAtMs > 0L ? ts.tunnelDownMbps : stored;
+
     private const long SWITCH_THROTTLE_MS = 60_000L;        // в фоне переключаться не чаще раза в 60с
     // Пауза при «НЕТ РАБОЧИХ СЕРВЕРОВ» (интернет есть, но ни один сервер не поднялся): удвоение 10 мин → 4 ч.
     private const long BACKOFF_START_MS = 10 * 60_000L;     // первая пауза «нет серверов» — 10 минут
@@ -275,6 +288,7 @@ public static class NetworkMonitor
         var cycles = 0;
         var lastSwitchMs = 0L;
         var lastOptimizeMs = now();
+        var optimizeSkipLogged = false;
         // Пр.126.A: «через туннель давно нет трафика» — предохранитель перемера. Считаем ФАКТ трафика по
         // приросту туннельных байт между циклами (temp-инстансы кандидатов сюда НЕ попадают).
         var lastUserTrafficMs = now();
@@ -557,6 +571,7 @@ public static class NetworkMonitor
                     if (backgroundWork is not { IsCompleted: false })
                         backgroundWork = Task.Run(async () =>
                         {
+                        var rated = false;
                         // Пр.146.Ф2 + ТЗ Elyor 2026-10-14 (свежий пинг «Живых»): периодически пингуем ВСЕХ кандидатов —
                         // убираем мёртвых И ловим воскресших. Раз в PING_REFRESH_INTERVAL_MS (15 мин). НЕ гейтим по
                         // userTrafficActive — пинг это КБ, активному трафику/замеру НЕ мешает.
@@ -565,22 +580,6 @@ public static class NetworkMonitor
                             lastPingRefreshMs = now();
                             var e4 = await runCatching(() => refreshAllPings(app, cur));
                             if (!e4.ok) MonitorLog.@event(app, "error", "Ошибка пинга всех", msg(e4.err!));
-                        }
-                        // Вторичное: «держать лучший». Пр.126.B: ДЕФОЛТ ВЫКЛ (monitorOptimizeSec=0) — замеры активного и
-                        // кандидата несопоставимы, решения шли бы по шуму. Пр.125.E: в экономии тоже выкл. Когда пользователь
-                        // включил — предохранители Пр.126.A (Wi-Fi / давно-нет-трафика / текущий-уже-быстрый) + не во время
-                        // активной загрузки (чтобы не делить канал и не портить замер).
-                        if (!cur.trafficSaveMode && cur.monitorEnabled && cur.activeOptimizeSec > 0 && heavyMeasureAllowed(app) && now() - lastOptimizeMs >= cur.activeOptimizeSec * 1000L)
-                        {
-                            lastOptimizeMs = now();
-                            var skip = optimizeSkipReason(app, cur, lastUserTrafficMs);
-                            if (skip != null) MonitorLog.@event(app, "monitor", "Перемер пропущен (Пр.126)", skip);
-                            else if (await userTrafficActive()) { /* идёт загрузка — не мешаем и не портим замер */ }
-                            else
-                            {
-                                var e5 = await runCatching(() => optimizeToFastest(app, cur));
-                                if (e5 != null) MonitorLog.@event(app, "error", "Ошибка оптимизации", msg(e5));
-                            }
                         }
                         // Пр.141: в ЭКОНОМИИ автоперемер выше выключен, поэтому полу-живой сервер (IP-чек проходит, но
                         // реально плохо) сам не чинится. Раз в economyRecheckSec — ОДИН дешёвый замер достаточности активного;
@@ -616,6 +615,7 @@ public static class NetworkMonitor
                                 lastMorningRateDay = doy;
                                 var e7 = await runCatching(() => morningRateTop(app, cur));
                                 if (e7 != null) MonitorLog.@event(app, "error", "Ошибка утреннего рейтинга", msg(e7));
+                                rated = true;
                             }
                         }
                         // ── ФОНОВЫЙ РЕЙТИНГ ТОПА (ТЗ Elyor): держим топ-N свежим. Развилка ШНУР/БАТАРЕЯ × сеть: на шнуре
@@ -649,6 +649,30 @@ public static class NetworkMonitor
                                 lastTopRateMs = now();
                                 var e9 = await runCatching(() => rebuildAndRateTop(app, cur));
                                 if (e9 != null) MonitorLog.@event(app, "error", "Ошибка фон-рейтинга топа", msg(e9));
+                                rated = true;
+                            }
+                        }
+                        // «Держать лучший». Правило Elyor 2026-11-02: сразу после замера выбираем самого быстрого, дальше проверяем тем чаще, чем медленнее
+                        // активный. Пр.125.E: в экономии выключено. Предохранители Пр.126.A: платная сеть, давно нет трафика.
+                        var upKey = ProxyState.state.value.serverKey;
+                        var upSrv = upKey == null ? null : SubscriptionManager.allServers(app).FirstOrDefault(it => SubscriptionManager.serverKey(it) == upKey);
+                        var activeMbps = upKey == null ? null : activeSpeedForChecks(upSrv?.speedMbps, TunnelSpeed.snapshot(), upKey);
+                        if (upKey != null && !cur.trafficSaveMode && cur.monitorEnabled && cur.activeOptimizeSec > 0 && heavyMeasureAllowed(app) &&
+                            (rated || now() - lastOptimizeMs >= Math.Min(upgradeCheckMs(activeMbps), cur.activeOptimizeSec * 1000L)))
+                        {
+                            lastOptimizeMs = now();
+                            var skip = optimizeSkipReason(app, cur, lastUserTrafficMs);
+                            if (skip != null)
+                            {
+                                if (!optimizeSkipLogged) MonitorLog.@event(app, "monitor", "Перемер пропущен (Пр.126)", skip);   // при частых проверках журнал не засоряем
+                                optimizeSkipLogged = true;
+                            }
+                            else if (activeMbps is >= 1.0 && await userTrafficActive()) { /* идёт загрузка — не мешаем; ниже 1 Мбит/с мешать нечему */ }
+                            else
+                            {
+                                optimizeSkipLogged = false;
+                                var e5 = await runCatching(() => optimizeToFastest(app, cur));
+                                if (e5 != null) MonitorLog.@event(app, "error", "Ошибка оптимизации", msg(e5));
                             }
                         }
                         });
@@ -1295,15 +1319,7 @@ public static class NetworkMonitor
         if (s.monitorOptimizeWifiOnly && isMeteredNetwork(app)) return "мобильная/платная сеть — только по Wi-Fi";
         if (s.monitorOptimizeIdleSkipSec > 0 && now() - lastUserTrafficMs > s.monitorOptimizeIdleSkipSec * 1000L)
             return $"через туннель давно нет трафика ({humanDur(now() - lastUserTrafficMs)}) — нечего оптимизировать";
-        if (s.monitorOptimizeSkipAboveMbps > 0)
-        {
-            var curKey = ProxyState.state.value.serverKey;
-            var curSpeed = curKey == null ? 0.0
-                : SubscriptionManager.allServers(app).FirstOrDefault(it => SubscriptionManager.serverKey(it) == curKey)?.speedMbps ?? 0.0;
-            if (curSpeed >= s.monitorOptimizeSkipAboveMbps)
-                return $"текущий уже быстрый ({fmt(curSpeed)} ≥ {fmt(s.monitorOptimizeSkipAboveMbps)}) — улучшать нечего";
-        }
-        return null;
+        return null;   // быстрый сервер не исключение, а редкая проверка (правило Elyor 2026-11-02, upgradeCheckMs)
     }
 
     /**
@@ -1311,7 +1327,7 @@ public static class NetworkMonitor
      * Меряем ТОЛЬКО кандидатов в топ и ТОЛЬКО по поводам (Пр.132.C): ни разу не измерен / замер устарел (Пр.132.D:
      * старее topFreshSec — скорость НЕ действующая) / прошлый замер провалился. Плюс подмешиваем несколько ещё не
      * измеренных (Пр.132.B: пинг плохо предсказывает скорость под DPI — иначе быстрый сервер с плохим пингом не
-     * найдётся). Топ свежий → НЕ мерим. Пинг — только для первого приближения/сортировки неизмеренных. Замеры
+     * найдётся). Топ свежий → кандидатов не мерим, но решение о переходе принимаем всё равно. Пинг — только для первого приближения/сортировки неизмеренных. Замеры
      * сопоставимы (Пр.130: и активный, и кандидатов — temp-инстансом). Массового замера всех живых в фоне НЕТ.
      */
     internal static Task optimizeToFastest(Context app, AppSettings s)
@@ -1347,11 +1363,6 @@ public static class NetworkMonitor
         // Пр.132.B: подмешать неизмеренных живых (иначе быстрый-с-плохим-пингом не найдём).
         var mixed = 0;
         foreach (var p in byPing) { if (mixed >= s.topMixUnmeasured) break; var k = key(p); if (p.speedMbps == null && !freshKeys.Contains(k) && !has(k)) { toMeasure.Add(new(k, p)); mixed++; } }
-        if (toMeasure.Count == 0)
-        {                                                                    // топ свежий — повода мерить нет
-            MonitorLog.@event(app, "monitor", "Топ свежий — перемер не нужен", $"в топе {freshKeys.Count}/{topN}, все ≤ {freshHours}ч");
-            return Task.CompletedTask;
-        }
         MonitorLog.@event(app, "monitor", $"Поддержание топа: мерю {toMeasure.Count} (топ {topN})", $"свежих {freshKeys.Count}, подмешано {mixed} · правило ×{s.keepBestMultiplier}");
         MonitorStatus.update(true, $"поддержание топа: {toMeasure.Count} замер(ов)", now(), 0);
         MonitorCoordinator.monitorSearchRunning = true;
@@ -1366,7 +1377,12 @@ public static class NetworkMonitor
             var curProfile = all.FirstOrDefault(it => key(it) == curKey);
             var curMbps = curProfile != null ? measureEnough(app, curProfile, enough) : -1.0;
             var results = new Dictionary<string, double>();
-            if (curMbps > 0) results[curKey] = curMbps;
+            if (curMbps > 0)
+            {
+                results[curKey] = curMbps;
+                var ts = TunnelSpeed.snapshot();
+                TunnelSpeed.setProbe(ts.directDownMbps, curMbps, ts.tunnelUpMbps, now(), curKey);   // при постоянном трафике проба не идёт, а скорость нужна
+            }
             string? bestKey = null; var bestMbps = 0.0;
             foreach (var c in toMeasure.Select(kv => kv.Value))
             {
@@ -1382,17 +1398,19 @@ public static class NetworkMonitor
             // лучший из СВЕЖЕГО топа тоже участвует в решении (его не перемеряли — он свежий); нестабильных не берём.
             // Число из памяти — только повод проверить, не основание уйти с живого туннеля: «свежим» считается замер до
             // topFreshSec (6 ч), сервер мог давно умереть (Windows 10, Elyor 2026-11-01: монитор раз за разом уводил на мёртвый №1).
-            var bestStored = freshTop.FirstOrDefault(p => key(p) != curKey && !results.ContainsKey(key(p)) && !isUnstableKey(key(p)) &&
-                (p.speedMbps ?? 0.0) > bestMbps && curMbps > 0 && (p.speedMbps ?? 0.0) >= curMbps * s.keepBestMultiplier);
-            if (bestStored != null)
+            // Идём от самого быстрого к медленному (решение Elyor 2026-11-02): мёртвый первый не закрывает путь следующему.
+            foreach (var p in freshTop.Where(p => key(p) != curKey && !results.ContainsKey(key(p)) && !isUnstableKey(key(p))))
             {
-                var k = key(bestStored);
-                var mbps = measureEnough(app, bestStored, enough);
+                var stored = p.speedMbps ?? 0.0;
+                if (curMbps <= 0 || stored <= bestMbps || stored < curMbps * s.keepBestMultiplier) break;   // список по убыванию: дальше только медленнее
+                var k = key(p);
+                var mbps = measureEnough(app, p, enough);
                 if (backgroundMustYield() || ProxyState.state.value.serverKey != curKey) return Task.CompletedTask;
                 results[k] = mbps;
                 if (mbps > bestMbps) { bestMbps = mbps; bestKey = k; }
                 // Провал скорость в реестре не затирает (Пр.88), поэтому из «Живых» его убирает пинг, иначе он так и стоял бы первым.
                 if (mbps <= 0.0) SubscriptionManager.applyPingResults(app, new Dictionary<string, int> { [k] = -1 });
+                if (mbps >= curMbps * s.keepBestMultiplier) break;   // подтвердился — дальше мерить незачем
             }
             SubscriptionManager.applySpeedResults(app, results);
             // ПРАВИЛО «ДЕРЖАТЬ ЛУЧШИЙ» (Промпт 90.A): переключаемся, если лучший быстрее текущего КРАТНО

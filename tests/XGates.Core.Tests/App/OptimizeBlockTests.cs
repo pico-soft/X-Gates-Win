@@ -30,7 +30,7 @@ public class OptimizeBlockTests
         // Перемер выкл → в блоке только «сколько быстрых» и «свежесть»; вкл → полный набор строк, правки — в активный набор.
         Assert.Equal(2, OptimizeBlock.rows(save).Count);
         var rows = OptimizeBlock.rows(D);
-        Assert.Equal(10, rows.Count);
+        Assert.Equal(9, rows.Count);
         var top = rows.Single(r => r.label == "Размер топа (быстрых серверов)");
         Assert.Equal(7, top.commit(D, "7")!.topBatchNormal);
         Assert.Equal(D.topBatchSave, top.commit(D, "7")!.topBatchSave);

@@ -509,6 +509,7 @@ public partial class MainWindow : Window
         {
             addRows(OptimizePanel, OptimizeBlock.rows(s).Skip(2));
             OptimizePanel.Children.Add(small(OptimizeBlock.TOP_HINT));
+            OptimizePanel.Children.Add(small(OptimizeBlock.UPGRADE_HINT));
             OptimizePanel.Children.Add(topCost);
         }
         else OptimizePanel.Children.Add(small(OptimizeBlock.OFF_HINT));
