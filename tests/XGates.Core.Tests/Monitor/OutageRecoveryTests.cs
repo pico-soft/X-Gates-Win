@@ -210,7 +210,9 @@ public sealed class OutageRecoveryTests : IDisposable
         NetworkMonitor.optimizeToFastest(ctx, SettingsStore.current()).Wait();
 
         Assert.NotEqual(ghost, ProxyState.state.value.serverKey);
-        Assert.Equal(-1, SubscriptionManager.allServers(ctx).First(it => SubscriptionManager.serverKey(it) == ghost).pingMs);   // ушёл из «Живых»
+        var ghostPing = SubscriptionManager.allServers(ctx).First(it => SubscriptionManager.serverKey(it) == ghost).pingMs;
+        Assert.True(ghostPing == -1, $"пинг {ghostPing}, фаза {TunnelHealth.snapshot().phase}: " +   // ушёл из «Живых»
+            string.Join(" | ", MonitorLog.state.value.Take(10).Select(e => $"{e.text} {e.detail}")));
     }
 
     [Theory]
