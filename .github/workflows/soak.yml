@@ -1,0 +1,40 @@
+# Серии повторов случайных сбоев на настоящей Windows (SoakTests). Обычный прогон видит сбой раз на сотни тестов и не показывает причину.
+# ТОЛЬКО по явному действию: ручной запуск или push в служебную ветку ci-soak. Ничего не публикует.
+name: soak
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci-soak]
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Ядро xray (закреплённая версия, сверка sha256 из tools/xray/fetch-xray.sh)
+        shell: pwsh
+        run: |
+          $s = Get-Content tools/xray/fetch-xray.sh -Raw
+          $ver = [regex]::Match($s, 'VERSION="([^"]+)"').Groups[1].Value
+          $sha = [regex]::Match($s, '\[windows-64\]="([0-9a-f]+)"').Groups[1].Value
+          $zip = Join-Path $env:RUNNER_TEMP 'xray.zip'
+          Invoke-WebRequest "https://github.com/XTLS/Xray-core/releases/download/$ver/Xray-windows-64.zip" -OutFile $zip
+          $got = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($got -ne $sha) { throw "sha256 НЕ совпал: $got (ожидался $sha)" }
+          Expand-Archive $zip third_party/xray/windows-64 -Force
+          Write-Host "xray $ver ok"
+
+      - name: Серии повторов
+        env:
+          XGATES_SOAK: '600'
+        run: dotnet test tests/XGates.Core.Tests -c Release --blame-hang-timeout 30m --filter "FullyQualifiedName~SoakTests" --logger "console;verbosity=normal"
