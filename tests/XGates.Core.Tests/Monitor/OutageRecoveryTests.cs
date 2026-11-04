@@ -346,6 +346,27 @@ public sealed class OutageRecoveryTests : IDisposable
     }
 
     [Fact]
+    public void Automatic_switch_stops_after_32_core_rejections()
+    {
+        var body = string.Join("\n", Enumerable.Range(0, 34).Select(i =>
+            $"vless://{i:D32}@127.0.0.1:443?type=tcp&security=none&encryption=bad#srv{i}"));
+        SubscriptionManager.init(ctx);
+        var (_, r) = SubscriptionManager.addLocalFromBody(ctx, body, "local");
+        Assert.True(r.ok, r.error);
+        var servers = SubscriptionManager.allServers(ctx);
+        SubscriptionManager.applyPingResults(ctx, servers.ToDictionary(SubscriptionManager.serverKey, _ => 20));
+        var first = servers.Single(p => p.remarks == "srv0");
+
+        XrayProxyService.start(ctx, XrayConfigBuilder.build(first), "srv0", SubscriptionManager.serverKey(first), auto: true);
+
+        Assert.True(WaitUntil(() => SubscriptionManager.allServers(ctx).Count(p => p.pingMs == -1) == 32 && !ProxyState.state.value.running,
+            30_000), $"отказов={SubscriptionManager.allServers(ctx).Count(p => p.pingMs == -1)}, состояние={ProxyState.state.value}, " +
+            $"журнал={string.Join(" | ", MonitorLog.state.value.TakeLast(8).Select(e => e.text + " — " + e.detail))}");
+        Assert.Equal(32, SubscriptionManager.allServers(ctx).Count(p => p.pingMs == -1));
+        Assert.Equal(2, SubscriptionManager.allServers(ctx).Count(p => p.pingMs == 20));
+    }
+
+    [Fact]
     public void Server_chosen_by_a_person_still_shows_the_error()
     {
         var servers = FreshTop(5.0, 30.0);

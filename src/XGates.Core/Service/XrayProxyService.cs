@@ -251,6 +251,7 @@ public static class XrayProxyService
 
     // Серверы, которых ядро не приняло в этой цепочке автопереключения (только под CoreOpSync).
     private static readonly HashSet<string> rejectedInSwitch = [];
+    private const int MAX_REJECTED_IN_SWITCH = 32;
 
     /**
      * Ядро не приняло сервер, выбранный монитором. Прежнее ядро к этому моменту остановлено, а без запущенного прокси нет и монитора, так что связь
@@ -262,9 +263,12 @@ public static class XrayProxyService
         if (gen != Interlocked.Read(ref coreOpGen)) return true;   // есть более поздний запрос: состояние определит он
         rejectedInSwitch.Add(failedKey);
         SubscriptionManager.applyPingResults(app!, new Dictionary<string, int> { [failedKey] = -1 });
-        if (NetworkMonitor.nextAliveAfterFailedStart(app!, rejectedInSwitch) is not { } next) { rejectedInSwitch.Clear(); return false; }
-        MonitorLog.@event(app!, "monitor", "Сервер не поднялся — беру следующий по скорости", $"{failedLabel}: {why ?? "ядро не запустилось"} → {ServerLabels.display(next.profile)}");
-        runCoreStartLocked(next.config, ServerLabels.full(next.profile), SubscriptionManager.serverKey(next.profile), gen, auto: true);
+        var next = rejectedInSwitch.Count < MAX_REJECTED_IN_SWITCH
+            ? NetworkMonitor.nextAliveAfterFailedStart(app!, rejectedInSwitch)
+            : null;
+        if (next is not { } selected) { rejectedInSwitch.Clear(); return false; }
+        MonitorLog.@event(app!, "monitor", "Сервер не поднялся — беру следующий по скорости", $"{failedLabel}: {why ?? "ядро не запустилось"} → {ServerLabels.display(selected.profile)}");
+        runCoreStartLocked(selected.config, ServerLabels.full(selected.profile), SubscriptionManager.serverKey(selected.profile), gen, auto: true);
         return true;
     }
 
