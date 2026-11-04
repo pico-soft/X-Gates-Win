@@ -1,7 +1,7 @@
 # X-Gates-Win — handoff для КК (порт X-Gates на Windows 10)
 
 > Документ для нового сеанса Claude Code («КК»). Написан 2026-10-30 основным разработчиком Android-версии
-> (Claude Code в `/home/elyor/projects/XrayProxyDroid`). Читать **целиком** перед планированием.
+> (Claude Code в `/home/elyor/codex-projects/XrayProxyDroid`). Читать **целиком** перед планированием.
 > Владелец проекта — Elyor; пишет по-русски, отвечать по-русски.
 
 ---
@@ -47,7 +47,7 @@
 ### 2.1 Код Android-версии
 - Этот репозиторий — **git-форк** Android-проекта: вся история и код Android лежат здесь же
   (`app/src/main/java/com/picosoft/xrayproxydroid/…`).
-- Живой Android-проект (там продолжается разработка и багфиксы): `/home/elyor/projects/XrayProxyDroid`
+- Живой Android-проект (там продолжается разработка и багфиксы): `/home/elyor/codex-projects/XrayProxyDroid`
   (remote `upstream`), GitHub `pico-soft/X-Gates` (remote `upstream-github`). **Push в оба отключён**
   (`git remote -v` → `DISABLED-push…`) — коммиты порта не должны уйти в Android-репо.
 - `README.md` — пользовательское описание Android-версии (фичи, порты, настройка браузера).

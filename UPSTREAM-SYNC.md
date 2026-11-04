@@ -1,6 +1,6 @@
 # Синхронизация с Android-версией (upstream)
 
-Android X-Gates продолжает развиваться и получать багфиксы в `/home/elyor/projects/XrayProxyDroid`
+Android X-Gates продолжает развиваться и получать багфиксы в `/home/elyor/codex-projects/XrayProxyDroid`
 (remote `upstream`; GitHub — `upstream-github`). Этот файл — **как правки оттуда попадают сюда**.
 
 ## Маркер

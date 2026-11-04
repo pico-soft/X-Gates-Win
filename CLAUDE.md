@@ -31,7 +31,7 @@
 - **Здесь работаем только с Windows-версией** (Elyor 2026-10-31). Всё, что нужно сделать в Android-версии, —
   только **инструкции для Android-КК** (что и почему, где в коде, как проверить на телефоне) в хэндоффе
   (`docs/android-handoff/` + копия в Android-папке). Kotlin-патчи, Android-тесты и сборку APK здесь не делаем.
-- **Сверка с Android (Elyor 2026-11-02):** папку `~/projects/XrayProxyDroid` читать можно и нужно: важна синхронизация функциональности и поиск
+- **Сверка с Android (Elyor 2026-11-02):** папку `~/codex-projects/XrayProxyDroid` читать можно и нужно: важна синхронизация функциональности и поиск
   логических ошибок в обеих версиях. Писать туда — только сообщения-хэндоффы с пометкой, что их написал Windows-КК.
 - **Всегда читать `HANDOFF-FROM-ANDROID.md` в корне проекта** (Elyor 2026-11-02): его пишет Android-КК. Читать в начале работы и перед выпуском,
   утверждения проверять по коду и запуском. Файл не коммитить: репозиторий публичный, `git add` только явными путями.
@@ -51,6 +51,8 @@
   общие синглтоны). Ядро для тестов: `tools/xray/fetch-xray.sh`.
 - **Непроверенное на Windows** — в отдельной ветке `wip/…`, не в main. В main — только проверенное; после проверки
   разложить wip по коммитам в main.
+- **Формулировка Elyor «бамп и деплой» означает полный выпуск:** следующая по нумерации версия, публичный GitHub latest-релиз
+  с тегом, MSI и подписанным манифестом обновления, а не только bump и push в main.
 - **Выпуск** (только по слову Elyor): прочитать `HANDOFF-FROM-ANDROID.md` → в wip-ветке поднять `Version`, `VersionCode`, `VersionNameDisplay` в `Directory.Build.props`, коммит
   `release: vX.Y beta (versionCode N)` → `gh workflow run windows.yml --ref <ветка>` → только при полностью зелёном прогоне: fast-forward `main` на этот коммит, MSI из артефакта `windows-check` этого же прогона,
   `python3 tools/release/make-update.py --msi <msi> --notes-file <notes> --out <папка>` (подпись здесь), `gh release create vX.Y.0-beta --target <sha> --title "X-Gates Win X.Y beta" --latest --notes-file <body> <msi> update.json update.json.sig`.
