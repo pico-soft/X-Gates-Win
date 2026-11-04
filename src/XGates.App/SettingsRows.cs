@@ -17,7 +17,8 @@ public sealed record SettingRow(
     SettingKind kind,
     Func<AppSettings, string> read,
     Func<AppSettings, string, AppSettings?> commit,   // null — значение не годится (поле подсвечивается, не сохраняем)
-    string defaultText)
+    string defaultText,
+    string? description = null)
 {
     /// <summary>Подпись как в SettingRowScaffold: «Метка, ед.».</summary>
     public string title => unit.Length == 0 ? label : $"{label}, {unit}";
@@ -50,10 +51,10 @@ public static class SettingsRows
             },
             get(SettingsStore.DEFAULTS));
 
-    private static SettingRow boolRow(string group, string label, Func<AppSettings, bool> get, Func<AppSettings, bool, AppSettings> set) =>
+    private static SettingRow boolRow(string group, string label, Func<AppSettings, bool> get, Func<AppSettings, bool, AppSettings> set, string? description = null) =>
         new(group, label, "", SettingKind.BOOL, s => get(s) ? "true" : "false",
             (s, t) => t switch { "true" => set(s, true), "false" => set(s, false), _ => null },
-            get(SettingsStore.DEFAULTS) ? "вкл" : "выкл");
+            get(SettingsStore.DEFAULTS) ? "вкл" : "выкл", description);
 
     public static readonly IReadOnlyList<SettingRow> rows =
     [
@@ -79,7 +80,8 @@ public static class SettingsRows
         doubleRow("Соединение и отдача", "Минимальная отдача", "Мбит/с", s => s.minUploadMbps, (s, v) => s with { minUploadMbps = v }, 0.0, 1000.0),
         intRow("Соединение и отдача", "Объём замера отдачи", "МБ", s => s.uploadMeasureMb, (s, v) => s with { uploadMeasureMb = v }, 1, 100),
         textRow("Соединение и отдача", "URL приёма отдачи", s => s.uploadProbeUrl, (s, v) => s with { uploadProbeUrl = v }),
-        boolRow("Прочее", "Автозапуск при старте", s => s.autoStartOnLaunch, (s, v) => s with { autoStartOnLaunch = v }),
+        boolRow("Прочее", "Подключаться при открытии приложения", s => s.autoStartOnLaunch, (s, v) => s with { autoStartOnLaunch = v },
+            "При первом открытии после запуска приложения: подключаемся к последнему серверу, обновляем подписки и проводим полный тест, чтобы найти самый быстрый (это заметный трафик). Запуск при входе в Windows — отдельный переключатель в разделе «Запуск»."),
         boolRow("Прочее", "Сообщать о новых версиях", s => s.notifyNewVersions, (s, v) => s with { notifyNewVersions = v }),
         // «Обходить системный VPN» — Android; на Windows обход VPN — фаза 2 (docs/decisions.md), строку не показываем.
         boolRow("Прочее", "Подробные логи", s => s.verboseLogs, (s, v) => s with { verboseLogs = v }),

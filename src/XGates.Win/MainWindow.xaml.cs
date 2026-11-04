@@ -443,6 +443,7 @@ public partial class MainWindow : Window
             var hint = new TextBlock { Text = $"деф. {row.defaultText}", Foreground = (Brush)FindResource("Gray"), FontSize = 11, Visibility = V(row.changed(s)) };
             var left = new StackPanel();
             left.Children.Add(new TextBlock { Text = row.title, TextWrapping = TextWrapping.Wrap });
+            if (row.description != null) left.Children.Add(new TextBlock { Text = row.description, TextWrapping = TextWrapping.Wrap, Foreground = (Brush)FindResource("Gray"), FontSize = 11, Margin = new Thickness(0, 2, 0, 2) });
             left.Children.Add(hint);
             FrameworkElement control;
             if (row.kind == SettingKind.BOOL)

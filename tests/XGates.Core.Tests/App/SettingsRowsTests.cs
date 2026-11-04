@@ -39,8 +39,9 @@ public class SettingsRowsTests
         Assert.Equal("curl/8", Row("User-Agent загрузки").commit(D, "curl/8")!.subUserAgent);   // UA: схема не нужна
         Assert.Null(Row("User-Agent загрузки").commit(D, "   "));
 
-        var auto = Row("Автозапуск при старте");
+        var auto = Row("Подключаться при открытии приложения");
         Assert.Equal("вкл", auto.defaultText);
+        Assert.Contains("полный тест", auto.description);
         Assert.False(auto.commit(D, "false")!.autoStartOnLaunch);
         Assert.True(auto.changed(D with { autoStartOnLaunch = false }));
         Assert.False(auto.changed(D));
