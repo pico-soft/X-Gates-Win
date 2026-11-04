@@ -34,6 +34,13 @@ public class StoreCompatTests
         return false;
     }
 
+    private static JsonNode? WithoutTlsFragment(string json)
+    {
+        var node = JsonNode.Parse(json);
+        node!.AsObject().Remove("tlsFragment");
+        return node;
+    }
+
     [Theory]
     [InlineData("settings-default.json")]
     [InlineData("settings-custom.json")]
@@ -50,7 +57,8 @@ public class StoreCompatTests
             Assert.True(s.allowedProtocols.SetEquals([Protocol.TROJAN, Protocol.VLESS]));
             Assert.Equal("https://example.com/x?y=1&z=«»", s.directProbeUrl);
         }
-        Assert.True(Same(JsonNode.Parse(kt), JsonNode.Parse(KJson.encodeToString(s))), "C# пишет тот же JSON, что Kotlin");
+        Assert.False(JsonNode.Parse(kt)!["tlsFragment"]!.GetValue<bool>());
+        Assert.True(Same(WithoutTlsFragment(kt), WithoutTlsFragment(KJson.encodeToString(s))), "C# пишет тот же JSON, что Kotlin; tlsFragment хранится отдельно в win_settings.json");
     }
 
     [Fact]

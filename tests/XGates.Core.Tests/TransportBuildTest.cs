@@ -76,7 +76,7 @@ public class TransportBuildTest
         var cfg = XrayConfigBuilder.build(p);
         Assert.Contains("\"network\": \"mkcp\"", cfg);
         Assert.Contains("\"kcpSettings\": {}", cfg);
-        Assert.Contains("\"udp\": [ { \"type\": \"mkcp-legacy\", \"settings\": { \"value\": \"mySeed\" } }, { \"type\": \"mkcp-legacy\", \"settings\": { \"header\": \"srtp\" } } ]", cfg);
+        Assert.Contains("\"udp\": [{ \"type\": \"mkcp-legacy\", \"settings\": { \"value\": \"mySeed\" } }, { \"type\": \"mkcp-legacy\", \"settings\": { \"header\": \"srtp\" } }]", cfg);
         Assert.DoesNotContain("\"seed\"", cfg);
         Assert.True(balanced(cfg), "json balanced");
     }
@@ -86,7 +86,7 @@ public class TransportBuildTest
     [InlineData("&headerType=none#n")]
     [InlineData("&headerType=unknown#n")]
     public void mkcp_without_header_still_has_the_original_mask(string tail) =>
-        Assert.Contains("\"udp\": [ { \"type\": \"mkcp-legacy\" } ]", XrayConfigBuilder.build(vless(KCP_LINK + tail)));
+        Assert.Contains("\"udp\": [{ \"type\": \"mkcp-legacy\" }]", XrayConfigBuilder.build(vless(KCP_LINK + tail)));
 
     [Fact]
     public void mkcp_wechat_video_uses_the_core_name() =>
