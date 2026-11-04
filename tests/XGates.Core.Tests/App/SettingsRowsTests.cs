@@ -49,4 +49,22 @@ public class SettingsRowsTests
         Assert.DoesNotContain(SettingsRows.rows, r => r.label.Contains("VPN"));   // обход VPN — фаза 2 Windows
         Assert.All(SettingsRows.rows, r => Assert.NotNull(r.commit(D, r.read(D))));   // дефолты сами валидны
     }
+
+    [Fact]
+    public void Economy_can_be_enabled_always_or_only_on_mobile()
+    {
+        var master = Row("Режим экономии трафика");
+        Assert.Equal("false", master.read(D));
+        Assert.DoesNotContain(SettingsRows.rowsFor(D), r => r.label == "Экономить только на мобильной сети");
+
+        var enabled = master.commit(D, "true")!;
+        var mobileOnly = SettingsRows.rowsFor(enabled).Single(r => r.label == "Экономить только на мобильной сети");
+        Assert.False(enabled.economyEffective(isMobile: false));
+        Assert.True(enabled.economyEffective(isMobile: true));
+
+        var always = mobileOnly.commit(enabled, "false")!;
+        Assert.True(always.economyEffective(isMobile: false));
+        Assert.True(always.economyEffective(isMobile: true));
+        Assert.False(master.commit(always, "false")!.economyEffective(isMobile: false));
+    }
 }

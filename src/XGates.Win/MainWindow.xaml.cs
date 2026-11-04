@@ -423,7 +423,7 @@ public partial class MainWindow : Window
     {
         ParamsPanel.Children.Clear();
         string? group = null;
-        foreach (var row in SettingsRows.rows)
+        foreach (var row in SettingsRows.rowsFor(SettingsStore.current()))
         {
             if (row.group != group)
             {
@@ -451,7 +451,15 @@ public partial class MainWindow : Window
                 var cb = new CheckBox { IsChecked = row.read(s) == "true", VerticalAlignment = VerticalAlignment.Center };
                 cb.Click += (_, _) =>
                 {
-                    if (row.commit(SettingsStore.current(), cb.IsChecked == true ? "true" : "false") is { } n) SettingsStore.update(ctx, n);
+                    if (row.commit(SettingsStore.current(), cb.IsChecked == true ? "true" : "false") is { } n)
+                    {
+                        SettingsStore.update(ctx, n);
+                        if (row.group == "Экономия трафика")
+                        {
+                            EconomyNet.applyNow(ctx);
+                            Dispatcher.BeginInvoke(() => { buildParams(); buildOptimize(); });
+                        }
+                    }
                     hint.Visibility = V(row.changed(SettingsStore.current()));
                 };
                 control = cb;

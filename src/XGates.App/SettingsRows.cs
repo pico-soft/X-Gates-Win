@@ -58,6 +58,10 @@ public static class SettingsRows
 
     public static readonly IReadOnlyList<SettingRow> rows =
     [
+        boolRow("Экономия трафика", "Режим экономии трафика", s => s.economyEnabled, (s, v) => s with { economyEnabled = v },
+            "Меньше замеров скорости: подключаемся к первому рабочему серверу и держим пару запасных. Проверки живости продолжаются как обычно."),
+        boolRow("Экономия трафика", "Экономить только на мобильной сети", s => s.trafficSaveAutoByNetwork, (s, v) => s with { trafficSaveAutoByNetwork = v },
+            "Если включено: на Wi-Fi/Ethernet — обычный режим, на мобильной — экономия. Если выключено: экономия действует всегда. Windows пока не определяет мобильную сеть, поэтому для ручной экономии на Wi-Fi выключите этот подпункт."),
         // «Автомониторинг» (MonitorSection Kotlin; блок интервалов перемера OptimizeChecksBlock — ещё не перенесён).
         boolRow("Автомониторинг", "Автомониторинг", s => s.monitorEnabled, (s, v) => s with { monitorEnabled = v }),
         doubleRow("Автомониторинг", "Порог прямого канала", "Мбит/с", s => s.monitorDirectThreshold, (s, v) => s with { monitorDirectThreshold = v }, 0.1, 100.0),
@@ -86,4 +90,7 @@ public static class SettingsRows
         // «Обходить системный VPN» — Android; на Windows обход VPN — фаза 2 (docs/decisions.md), строку не показываем.
         boolRow("Прочее", "Подробные логи", s => s.verboseLogs, (s, v) => s with { verboseLogs = v }),
     ];
+
+    public static IReadOnlyList<SettingRow> rowsFor(AppSettings s) =>
+        s.economyEnabled ? rows : rows.Where(r => r.label != "Экономить только на мобильной сети").ToList();
 }
