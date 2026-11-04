@@ -251,7 +251,7 @@ public static class XrayConfigBuilder
             var domain = header == "dns" && p.hostHeader.IsNotBlank() ? ", \"value\": " + j(p.hostHeader!) : "";
             masks.Add("{ \"type\": \"mkcp-legacy\", \"settings\": { \"header\": " + j(header) + domain + " } }");
         }
-        return "{ \"udp\": [ " + string.Join(", ", masks) + " ] }";
+        return "{ \"udp\": [" + string.Join(", ", masks) + "] }";
     }
 
     private static string tlsBlock(ServerProfile p)

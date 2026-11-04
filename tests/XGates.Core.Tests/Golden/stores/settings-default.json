@@ -49,6 +49,7 @@
     "economyAutoResetDone": false,
     "economyModelV2Migrated": false,
     "wifiOnlyEnabled": false,
+    "tlsFragment": false,
     "whiteListAutoEnabled": true,
     "whiteListModeActive": false,
     "whiteListManualNormal": false,
