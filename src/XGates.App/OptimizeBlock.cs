@@ -115,15 +115,16 @@ public static class OptimizeBlock
                 (x, v) => x.trafficSaveMode ? x with { measureMbSave = v } : x with { measureMbNormal = v }, 1, 100));
             list.Add(intRow("Предел давности замера", "ч", x => x.topFreshSec / 3600, dd.topFreshSec / 3600, (x, v) => x with { topFreshSec = v * 3600 }, 1, 168));
             list.Add(intRow("Подмешивать неизмеренных", "", x => x.topMixUnmeasured, dd.topMixUnmeasured, (x, v) => x with { topMixUnmeasured = v }, 0, 5));
-            list.Add(new SettingRow("Перемер", "Перемер только по Wi-Fi", "", SettingKind.BOOL, x => x.monitorOptimizeWifiOnly ? "true" : "false",
+            list.Add(new SettingRow("Перемер", "Перемер только на безлимитной сети", "", SettingKind.BOOL, x => x.monitorOptimizeWifiOnly ? "true" : "false",
                 (x, t) => t switch { "true" => x with { monitorOptimizeWifiOnly = true }, "false" => x with { monitorOptimizeWifiOnly = false }, _ => null },
-                dd.monitorOptimizeWifiOnly ? "вкл" : "выкл"));
+                dd.monitorOptimizeWifiOnly ? "вкл" : "выкл", METERED_HINT));
             list.Add(intRow("Не перемерять при простое дольше", "мин (0=всегда)", x => x.monitorOptimizeIdleSkipSec / 60, dd.monitorOptimizeIdleSkipSec / 60,
                 (x, v) => x with { monitorOptimizeIdleSkipSec = v * 60 }, 0, 240));
         }
         return list;
     }
 
+    public const string METERED_HINT = "Лимитная сеть — мобильная или помеченная системой как лимитная. На Windows определение лимитной сети пока не реализовано, поэтому этот предохранитель сейчас не срабатывает.";
     public const string FRESH_HINT = "Сервер с живым пингом и измеренной скоростью держится в «Живых», пока замер не старше этого окна; старее — уходит в «Ранее измеренные» (фон перемеряет их и возвращает ожившие в «Живые»).";
     public const string UPGRADE_HINT = "Чем медленнее текущий сервер, тем чаще ищем быстрее: от 10 Мбит/с раз в час, от 3 раз в 15 минут, от 1 раз в 5 минут, ниже 1 каждую минуту. Сразу после замеров — без ожидания. Настройка выше задаёт самую редкую проверку.";
     public const string TOP_HINT = "Держим актуальным ТОП быстрых. Мерим только кандидатов и по поводам: не измерян / замер старше предела давности / провал. Замер идёт на ДОСТАТОЧНОСТЬ — качаем, пока не подтвердится порог видео, и стоп (точное число не нужно). Пинг — лишь первое приближение (под DPI низкий пинг ≠ высокая скорость), поэтому подмешиваем неизмеренных. Массового замера всех НЕТ. «Бюджет точного замера» — для ручного полного теста.";

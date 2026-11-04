@@ -1330,16 +1330,16 @@ public static class NetworkMonitor
         }
     }
 
-    /// <summary>Активная сеть — платная (мобильная/лимитный хотспот)? Гейт «только Wi-Fi» для дорогого перемера (Пр.126.A).</summary>
+    /// <summary>Активная сеть — лимитная по системе (мобильная/раздача с телефона)? Гейт «только на безлимитной» для дорогого перемера (Пр.126.A).</summary>
     private static bool isMeteredNetwork(Context app) => Device.isMeteredNetwork();
 
     /**
      * Пр.126.A: причина ПРОПУСТИТЬ периодический перемер «держать лучший» (null — можно мерить). Предохранители
-     * против дорогого трафика в фоне: платная сеть, давно нет трафика через туннель, текущий сервер уже быстрый.
+     * против дорогого трафика в фоне: лимитная сеть, давно нет трафика через туннель, текущий сервер уже быстрый.
      */
     private static string? optimizeSkipReason(Context app, AppSettings s, long lastUserTrafficMs)
     {
-        if (s.monitorOptimizeWifiOnly && isMeteredNetwork(app)) return "мобильная/платная сеть — только по Wi-Fi";
+        if (s.monitorOptimizeWifiOnly && isMeteredNetwork(app)) return "сеть лимитная — перемер только на безлимитной";
         if (s.monitorOptimizeIdleSkipSec > 0 && now() - lastUserTrafficMs > s.monitorOptimizeIdleSkipSec * 1000L)
             return $"через туннель давно нет трафика ({humanDur(now() - lastUserTrafficMs)}) — нечего оптимизировать";
         return null;   // быстрый сервер не исключение, а редкая проверка (правило Elyor 2026-11-02, upgradeCheckMs)

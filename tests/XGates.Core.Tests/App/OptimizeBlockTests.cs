@@ -35,6 +35,7 @@ public class OptimizeBlockTests
         Assert.Equal(7, top.commit(D, "7")!.topBatchNormal);
         Assert.Equal(D.topBatchSave, top.commit(D, "7")!.topBatchSave);
         Assert.Equal(7200, rows.Single(r => r.label == "Предел давности замера").commit(D, "2")!.topFreshSec);
+        Assert.Contains("пока не реализовано", rows.Single(r => r.label == "Перемер только на безлимитной сети").description);
 
         var ru = CultureInfo.GetCultureInfo("ru-RU");
         Assert.Equal("≈ 1,5 ГБ/мес", OptimizeBlock.fmtData(1536, ru));

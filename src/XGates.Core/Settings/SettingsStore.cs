@@ -101,7 +101,7 @@ public sealed record AppSettings
     // меньше трафика, чем полный замер (верхняя граница 13 МБ на быстрый сервер). Ориентир 5-10 Мбит/с — хватает на видео.
     [JsonPropertyName("sufficientMbps")] public double sufficientMbps { get; init; } = 8.0;
     // Пр.126.A: предохранители перемера (работают, когда активный интервал > 0). ОБЩИЕ для обоих режимов.
-    [JsonPropertyName("monitorOptimizeWifiOnly")] public bool monitorOptimizeWifiOnly { get; init; } = true;  // не перемерять на мобильной/платной сети — только Wi-Fi
+    [JsonPropertyName("monitorOptimizeWifiOnly")] public bool monitorOptimizeWifiOnly { get; init; } = true;  // не перемерять на лимитной сети (мобильная, раздача с телефона)
     [JsonPropertyName("monitorOptimizeIdleSkipSec")] public int monitorOptimizeIdleSkipSec { get; init; } = 1800;  // не перемерять, если через туннель давно нет трафика, с (0=не пропускать)
     [JsonPropertyName("monitorOptimizeSkipAboveMbps")] public double monitorOptimizeSkipAboveMbps { get; init; } = 10.0;  // УСТАРЕЛО (Elyor 2026-11-02): не читается, быстрый сервер проверяется реже, см. upgradeCheckMs
     [JsonPropertyName("monitorDirectThreshold")] public double monitorDirectThreshold { get; init; } = 1.0;  // порог прямого канала, Мбит/с (эталон direct_speed_threshold)
