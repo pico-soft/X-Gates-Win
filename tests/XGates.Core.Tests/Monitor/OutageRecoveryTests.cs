@@ -61,6 +61,7 @@ public sealed class OutageRecoveryTests : IDisposable
         ServerSpeedTester.probesOverrideForTest = null;
         ServerSpeedTester.uploadFallbacks = ["https://speed.cloudflare.com/__up", "http://speedtest.tele2.net/upload.php"];
         NetworkMonitor.directAliveOverrideForTest = null;
+        NetworkMonitor.resetRecoveryRatingYield();
         ExternalIpChecker.onceOverrideForTest = null;
         SettingsStore.update(ctx, SettingsStore.current() with
         {
@@ -128,6 +129,22 @@ public sealed class OutageRecoveryTests : IDisposable
         var (_, r) = SubscriptionManager.addLocalFromBody(ctx, body, "local");
         Assert.True(r.ok, r.error);
         return SubscriptionManager.allServers(ctx);
+    }
+
+    [Fact]
+    public void Recovery_rating_yields_after_the_connected_server_stops_answering()
+    {
+        var port = net.StartVlessServer();
+        var active = Import(port)[0];
+        var key = SubscriptionManager.serverKey(active);
+        NetworkMonitor.resetRecoveryRatingYield();
+        ProxyState.update(running: true, label: "srv0", serverKey: key, message: "");
+
+        Assert.False(NetworkMonitor.recoveryRatingMustYield(ctx, active));
+
+        net.StopVlessServer(port);
+        Assert.True(NetworkMonitor.recoveryRatingMustYield(ctx, active));
+        Assert.True(NetworkMonitor.recoveryRatingMustYield(ctx, active));
     }
 
     [Fact]

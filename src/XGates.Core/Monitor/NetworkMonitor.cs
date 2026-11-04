@@ -709,7 +709,10 @@ public static class NetworkMonitor
                 {
                     case SwitchResult.SWITCHED:
                     {
-                        lastSwitchMs = now(); failures = 0; backoffMs = 0; lastLiveConfirmedMs = now();   // Пр.150: связь восстановлена — сброс grace
+                        lastSwitchMs = now(); failures = 0; backoffMs = 0;
+                        // Подключённый замолчал во время рейтинга: не продлеваем grace, следующий цикл сразу перепроверяет связь.
+                        if (recoveryRatingYielded) { resetRecoveryRatingYield(); graceRecheck = true; }
+                        else lastLiveConfirmedMs = now();   // Пр.150: связь восстановлена — сброс grace
                         var ip2 = ExternalIpChecker.fetch();   // подтвердить ФАКТОМ сразу
                         if (ip2 != null) { TunnelHealth.ok(ip2, now(), ProxyState.state.value.serverKey ?? ""); onRecovered(app); }
                         else TunnelHealth.setPhase(TunnelHealth.Phase.RECOVERING, now(), "проверяю после переключения…");
@@ -891,6 +894,7 @@ public static class NetworkMonitor
                     foreach (var c in cands)
                     {
                         if (MonitorCoordinator.fullTestRunning || ProxyState.state.value.serverKey != ownedKey) return SwitchResult.SWITCHED;
+                        if (recoveryRatingMustYield(app, connected)) return SwitchResult.SWITCHED;
                         if (freshFullGood(c)) { minimalByKey[SubscriptionManager.serverKey(c)] = c.speedMbps ?? 0.0; continue; }
                         var m = ServerSpeedTester.measureSpeedMinimal(app, c);
                         minimalByKey[SubscriptionManager.serverKey(c)] = m;
@@ -904,6 +908,7 @@ public static class NetworkMonitor
                     foreach (var c in viable)
                     {
                         if (MonitorCoordinator.fullTestRunning || ProxyState.state.value.serverKey != ownedKey) return SwitchResult.SWITCHED;
+                        if (recoveryRatingMustYield(app, connected)) return SwitchResult.SWITCHED;
                         double full;
                         if (freshFullGood(c)) full = c.speedMbps ?? 0.0;
                         else
@@ -990,6 +995,21 @@ public static class NetworkMonitor
     /// <summary>Фоновая работа уступает ручному тесту и восстановлению связи.</summary>
     private static bool backgroundMustYield() =>
         MonitorCoordinator.fullTestRunning || ProxyState.state.value.serverKey == null || TunnelHealth.snapshot().phase == TunnelHealth.Phase.RECOVERING;
+
+    private const int RECOVERY_YIELD_PING_TIMEOUT_MS = 3_000;
+    private static volatile bool recoveryRatingYielded;
+
+    internal static void resetRecoveryRatingYield() => recoveryRatingYielded = false;
+
+    /// <summary>Рейтинг внутри лестницы прерывается, если подключённый сервер дважды не ответил.</summary>
+    internal static bool recoveryRatingMustYield(Context app, ServerProfile active)
+    {
+        if (MonitorCoordinator.fullTestRunning || ProxyState.state.value.serverKey == null || recoveryRatingYielded) return true;
+        int ping() => ServerTester.isUdp(active) ? tunnelPing() : (int)ServerTester.ping(app, active, RECOVERY_YIELD_PING_TIMEOUT_MS);
+        if (ping() >= 0 || ping() >= 0) return false;
+        recoveryRatingYielded = true;
+        return true;
+    }
 
     /// <summary>Параллельная проверка передачей данных: первый живой становится активным. false — никто не успел.</summary>
     private static async Task<bool> raceToFirstAlive(Context app, IReadOnlyList<ServerProfile> candidates, string? fromKey, bool doMeasure)
