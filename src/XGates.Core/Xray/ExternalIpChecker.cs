@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using XGates.Core.Net;
 using XGates.Core.Platform;
+using XGates.Core.Service;
 
 namespace XGates.Core.Xray;
 
@@ -50,6 +51,8 @@ public static partial class ExternalIpChecker
     private static readonly object @lock = new();
     private static volatile bool inFlight;
     private static volatile string? lastResult;
+    private static ProxyState.ProbeToken? inFlightOwner;
+    private static ProxyState.ProbeToken? lastOwner;
     private static long generation;
 
     // Тестовый шов + счётчики (Промпт 101.C): подменяемая «одна работа» и наблюдаемая параллельность/число
@@ -104,22 +107,36 @@ public static partial class ExternalIpChecker
     }
 
     /// <summary>Единая точка запроса внешнего адреса. Блокирующий — запускать на фоновом потоке (как и раньше).</summary>
-    public static string? fetch(int? socksPort = null, int timeoutMs = TIMEOUT_MS, int maxEndpoints = int.MaxValue)
+    public static string? fetch(int? socksPort = null, int timeoutMs = TIMEOUT_MS, int maxEndpoints = int.MaxValue,
+        ProxyState.ProbeToken? tunnel = null)
     {
-        lock (@lock)
+        // Токен по умолчанию принадлежит активному туннелю. Один и тот же SOCKS-порт после переключения обслуживает уже
+        // другой сервер, поэтому склеивать можно только вызовы с РАВНЫМ владельцем. Запрос нового поколения ждёт старый,
+        // затем выполняется отдельно: параллельных проб по-прежнему нет, но чужой результат не возвращается.
+        tunnel ??= ProxyState.probeToken();
+        while (true)
         {
-            if (inFlight)
+            lock (@lock)
             {
-                // Запрос уже идёт — дождаться ЕГО результата, свой НЕ запускать (не плодим параллельные).
-                var gen = generation;
-                while (inFlight && generation == gen)
+                if (!ProxyState.isCurrent(tunnel)) return null;
+                if (inFlight)
                 {
-                    try { System.Threading.Monitor.Wait(@lock); } catch (ThreadInterruptedException) { return lastResult; }
+                    var gen = generation;
+                    while (inFlight && generation == gen)
+                    {
+                        try { System.Threading.Monitor.Wait(@lock); } catch (ThreadInterruptedException) { return null; }
+                    }
+                    if (inFlightOwner == tunnel && lastOwner == tunnel && ProxyState.isCurrent(tunnel))
+                    {
+                        Log.i(TAG, "запрос того же туннеля уже шёл — отдан его результат (без нового)");
+                        return lastResult;
+                    }
+                    continue;   // чужое поколение завершилось: теперь делаем собственный запрос
                 }
-                Log.i(TAG, "запрос внешнего адреса уже шёл — отдан его результат (без нового)");
-                return lastResult;
+                inFlight = true;
+                inFlightOwner = tunnel;
+                break;
             }
-            inFlight = true;
         }
         string? result = null;
         try
@@ -136,12 +153,13 @@ public static partial class ExternalIpChecker
             lock (@lock)
             {
                 lastResult = result;
+                lastOwner = tunnel;
                 inFlight = false;
                 generation++;
                 System.Threading.Monitor.PulseAll(@lock);
             }
         }
-        return result;
+        return ProxyState.isCurrent(tunnel) ? result : null;
     }
 
     /// <summary>Подмена эндпоинтов/порта TLS (только тесты: герметичная сеть).</summary>

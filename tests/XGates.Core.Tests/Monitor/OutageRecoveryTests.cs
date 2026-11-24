@@ -116,6 +116,47 @@ public sealed class OutageRecoveryTests : IDisposable
         Assert.Contains(MonitorLog.state.value, e => e.kind == "switch");
     }
 
+    [Fact]
+    public void Monitor_switch_requires_ip_from_new_server_not_cached_previous()
+    {
+        var servers = Import(net.StartVlessServer(), net.StartVlessServer());
+        var active = servers.First(it => it.remarks == "srv0");
+        var other = servers.First(it => it.remarks == "srv1");
+        var keyA = SubscriptionManager.serverKey(active);
+        var keyB = SubscriptionManager.serverKey(other);
+        SubscriptionManager.applyPingResults(ctx, servers.ToDictionary(SubscriptionManager.serverKey, _ => 20));
+        SubscriptionManager.applySpeedResults(ctx, new Dictionary<string, double> { [keyB] = 5.0 });
+        ExternalIpChecker.onceOverrideForTest = socks =>
+        {
+            try
+            {
+                using var s = Socks5.Connect(socks, "127.0.0.1", net.HttpPort, 3000);
+                s.ReceiveTimeout = 3000;
+                s.Send(Encoding.ASCII.GetBytes("GET /bytes?n=8 HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"));
+                var buf = new byte[64];
+                if (s.Receive(buf) <= 0 || !Encoding.ASCII.GetString(buf).StartsWith("HTTP/1.1 200")) return null;
+                return ProxyState.state.value.serverKey == keyB ? "198.51.100.2" : "198.51.100.1";
+            }
+            catch (Exception) { return null; }
+        };
+        var savedCandidate = NetworkMonitor.measureCandidate;
+        NetworkMonitor.measureCandidate = (_, p) => p.remarks == "srv0" ? 0.5 : 5.0;
+        try
+        {
+            Start(active);
+            Assert.True(WaitUntil(() => TunnelHealth.isConfirmedFor(keyA, JavaSystem.currentTimeMillis(), 60_000) &&
+                                         TunnelHealth.snapshot().ip == "198.51.100.1", 30_000, wake: true),
+                $"A не подтверждён своим IP: {TunnelHealth.snapshot()}");
+
+            NetworkMonitor.maybeStepFromDegraded(ctx, SettingsStore.current() with { degradationCheckSec = 0 }, keyA, passiveDown: 0.5).Wait();
+            Assert.True(WaitUntil(() => ProxyState.state.value.running && ProxyState.state.value.serverKey == keyB &&
+                                         TunnelHealth.isConfirmedFor(keyB, JavaSystem.currentTimeMillis(), 60_000), 30_000, wake: true),
+                $"B не подтверждён: {TunnelHealth.snapshot()}");
+            Assert.Equal("198.51.100.2", TunnelHealth.snapshot().ip);
+        }
+        finally { NetworkMonitor.measureCandidate = savedCandidate; }
+    }
+
     private void Start(ServerProfile p)
     {
         XrayProxyService.start(ctx, XrayConfigBuilder.build(p), ServerLabels.full(p), SubscriptionManager.serverKey(p));

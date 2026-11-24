@@ -353,15 +353,20 @@ public sealed class MainScreenModel : IDisposable
     /// <summary>Внешний IP ЧЕРЕЗ активный SOCKS — реальная живость туннеля (не просто «сокет слушает»).</summary>
     public void refreshIp()
     {
-        var sk = ProxyState.state.value.serverKey;
-        if (sk == null || !ProxyState.state.value.running) return;
+        var owner = ProxyState.probeToken();
+        if (owner == null) return;
         KThread.start(() =>
         {
-            var ip = ExternalIpChecker.fetch();
+            var ip = ExternalIpChecker.fetch(tunnel: owner);
             var nowMs = JavaSystem.currentTimeMillis();
-            if (ip != null) TunnelHealth.ok(ip, nowMs, sk);
-            else if (TunnelHealth.snapshot().phase == TunnelHealth.Phase.OK)
-                TunnelHealth.setPhase(TunnelHealth.Phase.VERIFYING, nowMs, "связь не подтверждена — проверяю");
+            if (ip != null)
+                ProxyState.ifCurrent(owner, () => TunnelHealth.ok(ip, nowMs, owner.serverKey));
+            else
+                ProxyState.ifCurrent(owner, () =>
+                {
+                    if (TunnelHealth.snapshot().phase == TunnelHealth.Phase.OK)
+                        TunnelHealth.setPhase(TunnelHealth.Phase.VERIFYING, nowMs, "связь не подтверждена — проверяю");
+                });
             MonitorCoordinator.wake();
         }, "refresh-ip");
     }

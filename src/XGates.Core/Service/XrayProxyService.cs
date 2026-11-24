@@ -57,7 +57,11 @@ public static class XrayProxyService
     private static readonly object CoreOpSync = new();
     private static long coreOpGen;
 
-    private static long newCoreOp() => Interlocked.Increment(ref coreOpGen);
+    private static long newCoreOp()
+    {
+        ProxyState.advanceTunnelGeneration();
+        return Interlocked.Increment(ref coreOpGen);
+    }
 
     private static void runCoreOp(long gen, string what, Action op)
     {

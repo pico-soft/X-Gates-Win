@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using XGates.Core.Platform;
+using XGates.Core.Service;
 using XGates.Core.Xray;
 using XGates.Core.Xray.Link;
 using L = XGates.Core.Libv2ray.Libv2ray;
@@ -223,6 +224,50 @@ public sealed class MeasurementIntegrationTests : IDisposable
 [Collection("xray")]
 public class SingleFlightTest
 {
+    [Fact]
+    public async Task server_switch_does_not_reuse_previous_tunnel_ip_request()
+    {
+        ExternalIpChecker.resetTestCounters();
+        using var firstStarted = new ManualResetEventSlim();
+        using var releaseFirst = new ManualResetEventSlim();
+        var calls = 0;
+        ExternalIpChecker.onceOverrideForTest = _ =>
+        {
+            if (Interlocked.Increment(ref calls) == 1)
+            {
+                firstStarted.Set();
+                Assert.True(releaseFirst.Wait(TimeSpan.FromSeconds(10)));
+                return "198.51.100.1";
+            }
+            return "198.51.100.2";
+        };
+        try
+        {
+            ProxyState.update(running: true, label: "A", serverKey: "key-A", message: "");
+            var forA = Task.Run(() => ExternalIpChecker.fetch(socksPort: 10815));
+            Assert.True(firstStarted.Wait(TimeSpan.FromSeconds(10)));
+
+            // Порт SOCKS прежний, но за ним уже другой сервер: ждать можно, отдавать ответ A для B нельзя.
+            ProxyState.update(running: true, label: "B", serverKey: "key-B", message: "");
+            var forB = Task.Run(() => ExternalIpChecker.fetch(socksPort: 10815));
+            Thread.Sleep(150);
+            Assert.False(forB.IsCompleted);
+            releaseFirst.Set();
+
+            Assert.Null(await forA.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal("198.51.100.2", await forB.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal(2, ExternalIpChecker.onceCount);
+            Assert.Equal(1, ExternalIpChecker.maxConcurrentSeen);
+        }
+        finally
+        {
+            releaseFirst.Set();
+            ProxyState.update(running: false, label: null, serverKey: null, message: "test done");
+            ExternalIpChecker.onceOverrideForTest = null;
+            ExternalIpChecker.resetTestCounters();
+        }
+    }
+
     [Fact]
     public void concurrent_callers_collapse_to_one_in_flight_request()
     {

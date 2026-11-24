@@ -312,6 +312,7 @@ public static class NetworkMonitor
         var lastFullCycleMs = 0L;           // дебаунс паразитных пробуждений: когда последний раз делали ДОРОГУЮ работу цикла
         var lastTopPingMs = 0L;             // фоновый рейтинг: когда последний раз пинговали ТОП (держим его живость)
         var lastTopRateMs = 0L;             // фоновый рейтинг: когда последний раз делали ПОЛНЫЙ замер топа (перестройка)
+        ProxyState.ProbeToken? ipOwner = null; // IP подтверждён только для этого serverKey + поколения ядра
         var ipUnconfirmed = false;          // внешний IP не получен: зелёной плашки не будет, пока не получим
         var lastIpRefreshMs = 0L;           // Пр.150: когда последний раз тянули внешний IP для ПОКАЗА на плашке
         var screenOffSinceMs = 0L;          // лестница интервалов: когда экран ПОГАС (0 = экран включён/ещё не гас)
@@ -476,6 +477,14 @@ public static class NetworkMonitor
                 // (ТЗ Elyor поверх Пр.150 — тот мерил каждый цикл, это был сток трафика/батареи). Живость держит ПИНГ
                 // (дёшев). Внешний IP тянем реже, только для плашки. ──
                 var curKey0 = ProxyState.state.value.serverKey;
+                var probeOwner = ProxyState.probeToken();
+                if (probeOwner != ipOwner)
+                {
+                    // Цикл переживает автопереключение: кэш A нельзя использовать для B (и для рестарта того же A).
+                    ipOwner = probeOwner;
+                    ipUnconfirmed = true;
+                    lastIpRefreshMs = 0L;
+                }
                 var curSrv0 = curKey0 == null ? null : SubscriptionManager.allServers(app).FirstOrDefault(it => SubscriptionManager.serverKey(it) == curKey0);
                 var aliveNow = false;
                 // Пинг АКТИВНОГО — tcping его host:port (ServerTester.ping, быстро, реально), КАЖДЫЙ цикл,
@@ -541,16 +550,26 @@ public static class NetworkMonitor
                     onRecovered(app);
                     // Внешний IP — ТОЛЬКО для показа, реже (флап не влияет на вердикт). Не вышло — держим прежний.
                     // Зелёная плашка — только по факту: открытый порт сервера ещё не значит, что через него идут данные.
-                    var ipShown = TunnelHealth.snapshot().ip;
-                    if (ipUnconfirmed || now() - lastIpRefreshMs >= IP_REFRESH_MS)
+                    if (probeOwner == null)
                     {
-                        lastIpRefreshMs = now();
-                        var fresh = ExternalIpChecker.fetch();
-                        ipUnconfirmed = fresh == null;
-                        if (fresh != null) ipShown = fresh;
+                        ipUnconfirmed = true;
+                        TunnelHealth.setPhase(TunnelHealth.Phase.VERIFYING, now(), "связь не подтверждена — проверяю");
                     }
-                    if (ipUnconfirmed) TunnelHealth.setPhase(TunnelHealth.Phase.VERIFYING, now(), "связь не подтверждена — проверяю");
-                    else TunnelHealth.ok(ipShown, now(), curKey0 ?? "");   // Пр.123.B: подтверждение принадлежит активному серверу
+                    else
+                    {
+                        var ipShown = TunnelHealth.snapshot().ip;
+                        if (ipUnconfirmed || now() - lastIpRefreshMs >= IP_REFRESH_MS)
+                        {
+                            lastIpRefreshMs = now();
+                            var fresh = ExternalIpChecker.fetch(tunnel: probeOwner);
+                            ipUnconfirmed = fresh == null;
+                            if (fresh != null) ipShown = fresh;
+                        }
+                        if (ipUnconfirmed)
+                            ProxyState.ifCurrent(probeOwner, () => TunnelHealth.setPhase(TunnelHealth.Phase.VERIFYING, now(), "связь не подтверждена — проверяю"));
+                        else
+                            ProxyState.ifCurrent(probeOwner, () => TunnelHealth.ok(ipShown, now(), probeOwner.serverKey));   // Пр.123.B: факт только этого поколения
+                    }
                     failures = 0; backoffMs = 0; restartedKeySinceOk = null;   // Промпт 102: связь ок — сбросить «уже перезапускали»
                     MonitorStatus.update(true, "ок", now(), cycles);
                     // ЖИВАЯ скорость плашки (гибрид): раз в цикл сэмплируем — реальный трафик даёт скорость
@@ -713,9 +732,14 @@ public static class NetworkMonitor
                         // Подключённый замолчал во время рейтинга: не продлеваем grace, следующий цикл сразу перепроверяет связь.
                         if (recoveryRatingYielded) { resetRecoveryRatingYield(); graceRecheck = true; }
                         else lastLiveConfirmedMs = now();   // Пр.150: связь восстановлена — сброс grace
-                        var ip2 = ExternalIpChecker.fetch();   // подтвердить ФАКТОМ сразу
-                        if (ip2 != null) { TunnelHealth.ok(ip2, now(), ProxyState.state.value.serverKey ?? ""); onRecovered(app); }
-                        else TunnelHealth.setPhase(TunnelHealth.Phase.RECOVERING, now(), "проверяю после переключения…");
+                        var recoveredOwner = ProxyState.probeToken();
+                        var ip2 = recoveredOwner == null ? null : ExternalIpChecker.fetch(tunnel: recoveredOwner);   // подтвердить ФАКТОМ сразу
+                        if (ip2 != null && recoveredOwner != null)
+                        {
+                            if (ProxyState.ifCurrent(recoveredOwner, () => TunnelHealth.ok(ip2, now(), recoveredOwner.serverKey))) onRecovered(app);
+                        }
+                        else if (recoveredOwner != null)
+                            ProxyState.ifCurrent(recoveredOwner, () => TunnelHealth.setPhase(TunnelHealth.Phase.RECOVERING, now(), "проверяю после переключения…"));
                         // Пр.146 Ф3.5: подбор подключает к ПЕРВОМУ живому (быстро). Чтобы вскоре перейти на САМЫЙ БЫСТРЫЙ
                         // (стабильный) — сдвигаем таймер «держать лучший» так, чтобы его проход открылся через ~90с (а не
                         // ждал полные 6ч). В экономии activeOptimizeSec=0 → проход и так не откроется (МБ не тратим).
@@ -1044,9 +1068,11 @@ public static class NetworkMonitor
         if (ProxyState.state.value.serverKey != key) return (-1.0, false);
         // Баг 2: подтверждаем факт СРАЗУ → зелёная плашка немедленно, а не серая до следующего цикла монитора.
         TunnelHealth.setPhase(TunnelHealth.Phase.RECOVERING, now(), "подключился — проверяю связь");
-        var ip = ExternalIpChecker.fetch();
-        var confirmed = ip != null;
-        if (confirmed) { TunnelHealth.ok(ip!, now(), key); onRecovered(app); }
+        var connectedOwner = ProxyState.probeToken();
+        var ip = connectedOwner == null ? null : ExternalIpChecker.fetch(tunnel: connectedOwner);
+        var confirmed = ip != null && connectedOwner != null &&
+                        ProxyState.ifCurrent(connectedOwner, () => TunnelHealth.ok(ip, now(), connectedOwner.serverKey));
+        if (confirmed) onRecovered(app);
         // Ночь/батарея: живость = подтверждённый внешний IP; скорость НЕ мерим (экономим батарею/трафик).
         if (!doMeasure) return (-1.0, confirmed);
         await delay(800);   // дать туннелю осесть

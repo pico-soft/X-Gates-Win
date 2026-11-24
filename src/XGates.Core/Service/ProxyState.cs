@@ -20,7 +20,12 @@ public sealed record ProxyStatus(
  */
 public static class ProxyState
 {
+    /// <summary>Владелец результата пробы: и сервер, и конкретный запуск ядра. Рестарт того же сервера — новое поколение.</summary>
+    public sealed record ProbeToken(string serverKey, long generation);
+
     private static readonly MutableStateFlow<ProxyStatus> _state = new(new ProxyStatus());
+    private static readonly object ProbeSync = new();
+    private static long tunnelGeneration;
     public static StateFlow<ProxyStatus> state => _state.asStateFlow();
 
     /** serverKey пишется АТОМАРНО вместе с running (одним ProxyStatus) — без промежуточных состояний. */
@@ -28,5 +33,44 @@ public static class ProxyState
         bool socksOk = false, bool httpOk = false, bool paused = false)
     {
         _state.value = new ProxyStatus(running, label, serverKey, message, socksOk, httpOk, paused);
+    }
+
+    /// <summary>Новый запрос старта/стопа ядра делает все незавершённые пробы прежнего туннеля устаревшими.</summary>
+    internal static long advanceTunnelGeneration()
+    {
+        lock (ProbeSync) return ++tunnelGeneration;
+    }
+
+    /// <summary>Токен действителен только для работающего туннеля с именованным сервером.</summary>
+    public static ProbeToken? probeToken()
+    {
+        lock (ProbeSync)
+        {
+            var s = _state.value;
+            return s.running && s.serverKey != null ? new ProbeToken(s.serverKey, tunnelGeneration) : null;
+        }
+    }
+
+    public static bool isCurrent(ProbeToken? token)
+    {
+        if (token == null) return true;   // прямые вызовы тестов/временного SOCKS без активного ProxyState
+        lock (ProbeSync)
+        {
+            var s = _state.value;
+            return s.running && s.serverKey == token.serverKey && tunnelGeneration == token.generation;
+        }
+    }
+
+    /// <summary>Атомарно с инвалидацией поколения: опоздавший сетевой ответ не меняет статус нового туннеля.</summary>
+    public static bool ifCurrent(ProbeToken? token, Action action)
+    {
+        if (token == null) { action(); return true; }
+        lock (ProbeSync)
+        {
+            var s = _state.value;
+            if (!s.running || s.serverKey != token.serverKey || tunnelGeneration != token.generation) return false;
+            action();
+            return true;
+        }
     }
 }
