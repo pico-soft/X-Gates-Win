@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Security.Authentication;
+using XGates.Core.Platform;
 
 namespace XGates.Core.Net;
 
@@ -67,6 +68,8 @@ public static class JavaExceptionNames
                     return "SocketTimeoutException";
                 case TaskCanceledException tce when tce.InnerException is TimeoutException:
                     return "SocketTimeoutException";
+                case HttpBodyTooLargeException:
+                    return "ResponseTooLarge";
                 case OperationCanceledException:
                     return "SocketTimeoutException";
                 case AuthenticationException:
@@ -93,22 +96,47 @@ public static class JavaExceptionNames
     }
 }
 
+/// <summary>Разжатое тело больше разрешённого предела; не является обычным сетевым обрывом.</summary>
+internal sealed class HttpBodyTooLargeException(long limit) : IOException($"тело ответа больше {limit} байт");
+
 /// <summary>Общие кусочки HttpURLConnection-семантики для fetch/stream.</summary>
 internal static class HttpUrlConnectionCompat
 {
-    /// <summary>Тело с «readTimeout»: таймаут на КАЖДОЕ чтение (как SO_TIMEOUT), а не на всю загрузку.</summary>
-    public static async Task<byte[]> ReadAllWithReadTimeout(Stream s, int readTimeoutMs, CancellationToken outer = default)
+    public static long deadlineAfterMs(int timeoutMs) => JavaSystem.nanoTime() + Math.Max(1, timeoutMs) * 1_000_000L;
+
+    /// <summary>Остаток до абсолютного monotonic-deadline; 0 означает, что время уже вышло.</summary>
+    public static int remainingMs(long deadlineNanos)
     {
+        var left = deadlineNanos - JavaSystem.nanoTime();
+        if (left <= 0) return 0;
+        return (int)Math.Min(int.MaxValue, (left + 999_999L) / 1_000_000L);
+    }
+
+    /// <summary>
+    /// Тело с «readTimeout» на КАЖДОЕ чтение, абсолютным deadline и лимитом РАЗЖАТЫХ байт. Читаем максимум
+    /// на один байт сверх остатка: ответ ровно [maxBytes] допустим, а следующий байт уже отклоняется.
+    /// </summary>
+    public static async Task<byte[]> ReadAllWithReadTimeout(
+        Stream s, int readTimeoutMs, int maxBytes, long deadlineNanos, CancellationToken outer = default)
+    {
+        if (maxBytes < 0) throw new ArgumentOutOfRangeException(nameof(maxBytes));
         var ms = new MemoryStream();
         var buf = new byte[16 * 1024];
         while (true)
         {
+            var remaining = remainingMs(deadlineNanos);
+            if (remaining == 0) throw new TimeoutException("Общий таймаут загрузки");
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(outer);
-            cts.CancelAfter(Math.Max(1, readTimeoutMs));
+            cts.CancelAfter(Math.Min(Math.Max(1, readTimeoutMs), remaining));
             int n;
-            try { n = await s.ReadAsync(buf, cts.Token).ConfigureAwait(false); }
-            catch (OperationCanceledException) when (!outer.IsCancellationRequested) { throw new TimeoutException("Read timed out"); }
+            var allowed = Math.Min(buf.Length, maxBytes - (int)ms.Length + 1);
+            try { n = await s.ReadAsync(buf.AsMemory(0, allowed), cts.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (!outer.IsCancellationRequested)
+            {
+                throw new TimeoutException(remainingMs(deadlineNanos) == 0 ? "Общий таймаут загрузки" : "Read timed out");
+            }
             if (n <= 0) break;
+            if (ms.Length + n > maxBytes) throw new HttpBodyTooLargeException(maxBytes);
             ms.Write(buf, 0, n);
         }
         return ms.ToArray();

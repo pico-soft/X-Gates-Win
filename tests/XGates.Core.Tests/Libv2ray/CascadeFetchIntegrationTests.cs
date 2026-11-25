@@ -1,3 +1,5 @@
+using System.IO.Compression;
+using System.Text;
 using XGates.Core.Net;
 using XGates.Core.Platform;
 using XGates.Core.Subscription;
@@ -143,6 +145,70 @@ public sealed class CascadeFetchIntegrationTests : IDisposable
         Assert.Null(temp[0].result);                              // ядро не поднялось — кандидат пропущен
         Assert.True(temp[1].result is { ok: true }, "через живой temp-инстанс тело получено");
         Assert.True(SubscriptionManager.hasSupportedLinks(temp[1].result!.body));
+    }
+
+    [Fact]
+    public void Text_fetch_limits_decompressed_gzip_body()
+    {
+        byte[] compressed;
+        using (var output = new MemoryStream())
+        {
+            using (var gzip = new GZipStream(output, CompressionLevel.Fastest, leaveOpen: true))
+                gzip.Write(new byte[9 * 1024 * 1024]);   // маленький сжатый ответ, больше 8 МиБ после распаковки
+            compressed = output.ToArray();
+        }
+        net.RawResponses["/gzip"] = Encoding.ASCII.GetBytes(
+            $"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {compressed.Length}\r\nConnection: close\r\n\r\n").Concat(compressed).ToArray();
+
+        var r = SubscriptionFetcher.fetch(U("/gzip"), "ua", 3000, HttpRoute.DIRECT);
+
+        Assert.False(r.ok);
+        Assert.Equal("ResponseTooLarge", r.exceptionClass);
+        Assert.Empty(r.body);
+    }
+
+    [Fact]
+    public void Text_fetch_has_absolute_deadline_across_successful_reads()
+    {
+        var started = Environment.TickCount64;
+        var r = SubscriptionFetcher.fetch(U("/drip"), "ua", 200, HttpRoute.DIRECT);
+        var elapsed = Environment.TickCount64 - started;
+
+        Assert.False(r.ok);
+        Assert.Equal("SocketTimeoutException", r.exceptionClass);
+        Assert.True(elapsed < 900, $"абсолютный deadline не сработал: {elapsed} мс");
+    }
+
+    [Fact]
+    public void Binary_download_rejects_more_than_expected_and_removes_partial_file()
+    {
+        var payload = new byte[128 * 1024];
+        net.RawResponses["/no-length"] = Encoding.ASCII.GetBytes(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nConnection: close\r\n\r\n").Concat(payload).ToArray();
+        var dest = Path.Combine(ctx.filesDir, "update.msi");
+
+        var r = CascadeFetch.download(ctx, U("/no-length"), "ua", dest, 1000, 1000, 5000, expectedSize: 32 * 1024);
+
+        Assert.False(r.ok);
+        Assert.Contains("размер", r.attempts.Single(a => !a.skipped).note, StringComparison.OrdinalIgnoreCase);
+        Assert.False(File.Exists(dest));
+    }
+
+    [Fact]
+    public void Binary_download_enforces_total_deadline_during_stream()
+    {
+        var dest = Path.Combine(ctx.filesDir, "slow.msi");
+        var started = Environment.TickCount64;
+        // Страховка для старого кода: через 2,5 с он завершится как «отменено», а не зависнет в тесте навсегда.
+        var r = CascadeFetch.download(ctx, U("/drip"), "ua", dest, 1000, 1000, 300,
+            isCancelled: () => Environment.TickCount64 - started > 2500);
+        var elapsed = Environment.TickCount64 - started;
+
+        Assert.False(r.ok);
+        Assert.False(r.cancelled, "загрузку остановила внешняя страховка, а не общий deadline");
+        Assert.Contains("общий таймаут", r.attempts.Single(a => !a.skipped).note, StringComparison.OrdinalIgnoreCase);
+        Assert.True(elapsed < 1500, $"абсолютный deadline не сработал: {elapsed} мс");
+        Assert.False(File.Exists(dest));
     }
 
     [Fact]

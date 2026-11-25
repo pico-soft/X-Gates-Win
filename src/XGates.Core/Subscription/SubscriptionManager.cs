@@ -721,6 +721,7 @@ public static partial class SubscriptionManager
             return "cleartext http:// заблокирован политикой Android — используйте https://";
         if (res.exceptionClass == "UnknownHostException") return $"Хост не найден (нет сети/DNS): {res.errorMessage}";
         if (res.exceptionClass == "SocketTimeoutException") return $"Таймаут загрузки ({res.errorMessage})";
+        if (res.exceptionClass == "ResponseTooLarge") return $"Ответ слишком большой: {res.errorMessage}";
         if (res.exceptionClass != null) return $"Сеть недоступна: {res.exceptionClass}: {res.errorMessage}";
         if (res.httpCode is < 200 or > 299) return $"HTTP {res.httpCode} — сервер отклонил запрос";
         return "Неизвестная ошибка загрузки";

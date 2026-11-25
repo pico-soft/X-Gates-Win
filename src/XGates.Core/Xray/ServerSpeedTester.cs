@@ -403,12 +403,16 @@ public static class ServerSpeedTester
      * [SubscriptionFetcher] (редиректы/типизированный результат) через socks temp-инстанса. Не трогает
      * активный прокси. Трафик → «Тест». null — temp-инстанс не поднялся.
      */
-    public static FetchResult? fetchViaTempInstance(Context context, ServerProfile profile, string url, string userAgent, int timeoutMs)
+    public static FetchResult? fetchViaTempInstance(Context context, ServerProfile profile, string url, string userAgent, int timeoutMs, int totalTimeoutMs = -1)
     {
         XrayController.ensureEnv(context);
         var verbose = SettingsStore.current().verboseLogs;
         void log(string msg) { if (verbose) Log.i(TAG, msg); }
         var name = profile.remarks.IfBlank(profile.address);
+        var started = JavaSystem.nanoTime();
+        int remaining() => totalTimeoutMs > 0
+            ? Math.Max(0, totalTimeoutMs - (int)((JavaSystem.nanoTime() - started) / 1_000_000L))
+            : -1;
         Interlocked.Increment(ref concurrentMeasures);
         try
         {
@@ -424,11 +428,14 @@ public static class ServerSpeedTester
             try
             {
                 core.startLoop(cfg, 0);
-                if (!core.isRunning || !awaitPort(port.Value, deadlineMs: 2_000))
+                var portWaitMs = totalTimeoutMs > 0 ? Math.Min(2_000, remaining()) : 2_000;
+                if (!core.isRunning || portWaitMs <= 0 || !awaitPort(port.Value, deadlineMs: portWaitMs))
                 {
                     log($"«{name}» fetchViaTempInstance temp-инстанс не поднялся"); return null;
                 }
-                var res = SubscriptionFetcher.fetch(url, userAgent, timeoutMs, new HttpRoute.Socks("127.0.0.1", port.Value));
+                var left = remaining();
+                if (totalTimeoutMs > 0 && left <= 0) return null;   // запуск ядра уже израсходовал общий бюджет
+                var res = SubscriptionFetcher.fetch(url, userAgent, timeoutMs, new HttpRoute.Socks("127.0.0.1", port.Value), left);
                 if (res.bodyBytes > 0) TrafficTracker.addTest(res.bodyBytes);
                 log($"«{name}» fetchViaTempInstance http={res.httpCode} bytes={res.bodyBytes}");
                 return res;

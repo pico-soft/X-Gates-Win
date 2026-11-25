@@ -272,6 +272,17 @@ public sealed class LocalTestNet : IDisposable
                             await s.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {bodyBytes.Length}\r\n\r\n"), cts.Token);
                             await s.WriteAsync(bodyBytes, cts.Token);
                         }
+                        else if (target.StartsWith("/drip"))
+                        {
+                            // Медленный поток без Content-Length: 20 байт с паузами, затем соединение остаётся открытым.
+                            // Абсолютный deadline должен оборвать его раньше, чем поможет readTimeout после последнего байта.
+                            await s.WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nConnection: close\r\n\r\n"), cts.Token);
+                            for (var sent = 0; sent < 20; sent++)
+                            {
+                                await Task.Delay(50, cts.Token);
+                                await s.WriteAsync(new byte[] { 0x78 }, cts.Token);
+                            }
+                        }
                         else if (target.StartsWith("/bytes"))
                         {
                             int len = int.Parse(target.Split("n=")[1].Split('&')[0]);

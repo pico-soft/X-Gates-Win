@@ -77,6 +77,7 @@ public static class CascadeFetch
     private const int MAX_TEMP_CANDIDATES = 5;
     private const int MAX_REDIRECTS = 5;
     private const int DOWNLOAD_BUFFER = 64 * 1024;
+    internal const long MAX_DOWNLOAD_BYTES = 256L * 1024 * 1024;   // с запасом над MSI ~40 МБ
 
     /**
      * Коды, при которых каскад ОБРЫВАЕТСЯ немедленно (Промпт 81.A) — маршрут ни при чём, перебор ступеней
@@ -186,8 +187,8 @@ public static class CascadeFetch
         acceptBody ??= it => it.ok && it.body.IsNotBlank();
         var app = context.applicationContext;
         var attempts = new List<CascadeAttempt>();
-        var start = JavaSystem.nanoTime();
-        bool overBudget() => (JavaSystem.nanoTime() - start) / 1_000_000 > totalTimeoutMs;
+        var deadline = HttpUrlConnectionCompat.deadlineAfterMs(totalTimeoutMs);
+        bool overBudget() => HttpUrlConnectionCompat.remainingMs(deadline) == 0;
 
         // Ступени 1–5 из общего планировщика (с учётом proxyFirst для обновлений).
         var plans = orderedPlans(httpStagePlans(url, directTimeoutMs, proxyTimeoutMs), proxyFirst);
@@ -195,8 +196,9 @@ public static class CascadeFetch
         {
             var plan = plans[i];
             if (plan.open == null) { attempts.Add(skip(plan.stage, plan.skipNote)); continue; }
-            if (i > 0 && overBudget()) { attempts.Add(skip(plan.stage, "общий таймаут")); continue; }
-            var r = SubscriptionFetcher.fetch(url, userAgent, plan.timeoutMs, plan.open);
+            if (overBudget()) { attempts.Add(skip(plan.stage, "общий таймаут")); continue; }
+            var r = SubscriptionFetcher.fetch(url, userAgent, plan.timeoutMs, plan.open,
+                totalTimeoutMs: HttpUrlConnectionCompat.remainingMs(deadline));
             var ok = acceptBody(r);
             attempts.Add(new CascadeAttempt(plan.stage, skipped: false, accepted: ok, result: r));
             if (ok) return new CascadeResult(true, plan.stage, r, attempts);
@@ -224,7 +226,8 @@ public static class CascadeFetch
             {
                 if (overBudget()) { attempts.Add(skip(FetchStage.TEMP_RECENT, "общий таймаут")); break; }
                 var name = c.remarks.IfBlank(c.address);
-                var r = ServerSpeedTester.fetchViaTempInstance(app, c, url, userAgent, tempT);
+                var r = ServerSpeedTester.fetchViaTempInstance(app, c, url, userAgent, tempT,
+                    totalTimeoutMs: HttpUrlConnectionCompat.remainingMs(deadline));
                 var ok = r != null && acceptBody(r);
                 attempts.Add(new CascadeAttempt(FetchStage.TEMP_RECENT, skipped: false, accepted: ok, result: r, note: name));
                 if (ok) return new CascadeResult(true, FetchStage.TEMP_RECENT, r, attempts);
@@ -257,18 +260,18 @@ public static class CascadeFetch
         isCancelled ??= () => false;
         onProgress ??= (_, _) => { };
         var attempts = new List<CascadeAttempt>();
-        var start = JavaSystem.nanoTime();
-        bool overBudget() => (JavaSystem.nanoTime() - start) / 1_000_000 > totalTimeoutMs;
+        var deadline = HttpUrlConnectionCompat.deadlineAfterMs(totalTimeoutMs);
+        bool overBudget() => HttpUrlConnectionCompat.remainingMs(deadline) == 0;
 
         var plans = httpStagePlans(url, directTimeoutMs, proxyTimeoutMs);
         for (int i = 0; i < plans.Count; i++)
         {
             var plan = plans[i];
             if (plan.open == null) { attempts.Add(skip(plan.stage, plan.skipNote)); continue; }
-            if (i > 0 && overBudget()) { attempts.Add(skip(plan.stage, "общий таймаут")); continue; }
+            if (overBudget()) { attempts.Add(skip(plan.stage, "общий таймаут")); continue; }
             if (isCancelled()) return new CascadeDownloadResult(false, null, 0, attempts, cancelled: true);
 
-            var res = streamTo(url, userAgent, plan.timeoutMs, plan.open, dest, expectedSize, isCancelled, onProgress);
+            var res = streamTo(url, userAgent, plan.timeoutMs, plan.open, dest, expectedSize, isCancelled, onProgress, deadline);
             if (res.cancelled)
             {
                 attempts.Add(new CascadeAttempt(plan.stage, skipped: false, accepted: false, result: null, note: "отменено"));
@@ -290,30 +293,41 @@ public static class CascadeFetch
 
     private sealed record StreamOutcome(bool ok, long bytes, string note, bool cancelled = false, int code = -1);
 
-    /// <summary>Одна попытка стрима в файл: проходим редиректы (в т.ч. GitHub asset → CDN), пишем чанками.</summary>
+    /// <summary>Одна попытка стрима в файл: редиректы и тело делят абсолютный deadline всего каскада.</summary>
     private static StreamOutcome streamTo(
         string url, string userAgent, int timeoutMs, HttpRoute open, string dest, long expectedSize,
-        Func<bool> isCancelled, Action<long, long> onProgress)
+        Func<bool> isCancelled, Action<long, long> onProgress, long deadlineNanos)
     {
         var current = url;
         var redirects = 0;
+        var fileCreated = false;
+        var keepFile = false;
+        if (expectedSize > MAX_DOWNLOAD_BYTES)
+            return new StreamOutcome(false, 0, $"размер обновления больше предела {MAX_DOWNLOAD_BYTES} байт");
+        var maxBytes = expectedSize > 0 ? Math.Min(expectedSize, MAX_DOWNLOAD_BYTES) : MAX_DOWNLOAD_BYTES;
         try
         {
             while (true)
             {
                 if (isCancelled()) return new StreamOutcome(false, 0, "отменено", cancelled: true);
-                using var handler = open.CreateHandler(timeoutMs);
+                var remaining = HttpUrlConnectionCompat.remainingMs(deadlineNanos);
+                if (remaining == 0) return new StreamOutcome(false, 0, "общий таймаут");
+                using var handler = open.CreateHandler(Math.Min(Math.Max(1, timeoutMs), remaining));
                 using var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
                 HttpResponseMessage resp;
                 try
                 {
-                    using var headersCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(Math.Max(1, timeoutMs) * 2L));
+                    var headersBudget = (int)Math.Min(Math.Max(1, timeoutMs) * 2L, remaining);
+                    using var headersCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(headersBudget));
                     resp = http.SendAsync(HttpUrlConnectionCompat.Get(current, userAgent), HttpCompletionOption.ResponseHeadersRead, headersCts.Token)
                         .GetAwaiter().GetResult();
                 }
                 catch (Exception e)
                 {
-                    return new StreamOutcome(false, 0, $"сеть: {JavaExceptionNames.simpleName(e)}");
+                    return new StreamOutcome(false, 0,
+                        HttpUrlConnectionCompat.remainingMs(deadlineNanos) == 0
+                            ? "общий таймаут"
+                            : $"сеть: {JavaExceptionNames.simpleName(e)}");
                 }
                 using (resp)
                 {
@@ -329,28 +343,40 @@ public static class CascadeFetch
                     if (code is < 200 or > 299) return new StreamOutcome(false, 0, $"HTTP {code}", code: code);
 
                     var len = resp.Content.Headers.ContentLength ?? -1;
+                    if (len > maxBytes) return new StreamOutcome(false, 0, $"размер ответа больше {maxBytes} байт");
                     var total = len > 0 ? len : expectedSize;
                     long downloaded = 0L;
                     try
                     {
                         using var @out = File.Create(dest);
+                        fileCreated = true;
                         using var inp = resp.Content.ReadAsStream();
                         var buf = new byte[DOWNLOAD_BUFFER];
                         while (true)
                         {
                             if (isCancelled()) return new StreamOutcome(false, downloaded, "отменено", cancelled: true);
-                            using var cts = new CancellationTokenSource(Math.Max(1, timeoutMs));   // readTimeout на каждое чтение
-                            int n = inp.ReadAsync(buf, cts.Token).AsTask().GetAwaiter().GetResult();
+                            remaining = HttpUrlConnectionCompat.remainingMs(deadlineNanos);
+                            if (remaining == 0) return new StreamOutcome(false, downloaded, "общий таймаут");
+                            using var cts = new CancellationTokenSource(Math.Min(Math.Max(1, timeoutMs), remaining));
+                            // Один байт сверх предела отличает слишком большой ответ от файла ровно нужного размера.
+                            var allowed = (int)Math.Min(buf.Length, maxBytes - downloaded + 1);
+                            int n = inp.ReadAsync(buf.AsMemory(0, allowed), cts.Token).AsTask().GetAwaiter().GetResult();
                             if (n <= 0) break;
-                            @out.Write(buf, 0, n);
                             downloaded += n;
+                            if (downloaded > maxBytes)
+                                return new StreamOutcome(false, downloaded, $"размер ответа больше {maxBytes} байт");
+                            @out.Write(buf, 0, n);
                             onProgress(downloaded, total);
                         }
                     }
                     catch (Exception e)
                     {
-                        return new StreamOutcome(false, downloaded, $"обрыв: {JavaExceptionNames.simpleName(e)}");
+                        return new StreamOutcome(false, downloaded,
+                            HttpUrlConnectionCompat.remainingMs(deadlineNanos) == 0
+                                ? "общий таймаут"
+                                : $"обрыв: {JavaExceptionNames.simpleName(e)}");
                     }
+                    keepFile = true;
                     return new StreamOutcome(true, downloaded, "ok");
                 }
             }
@@ -358,6 +384,11 @@ public static class CascadeFetch
         catch (Exception e)
         {
             return new StreamOutcome(false, 0, $"ошибка: {JavaExceptionNames.simpleName(e)}");
+        }
+        finally
+        {
+            // streamTo используется для MSI: частичный файл нельзя оставлять даже если вызывающий забудет уборку.
+            if (fileCreated && !keepFile) try { File.Delete(dest); } catch (Exception) { }
         }
     }
 

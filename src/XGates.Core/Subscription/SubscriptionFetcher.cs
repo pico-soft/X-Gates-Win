@@ -41,6 +41,7 @@ public sealed record FetchResult
 public static class SubscriptionFetcher
 {
     private const int MAX_REDIRECTS = 5;
+    internal const int MAX_TEXT_BYTES = 8 * 1024 * 1024;   // после gzip-декомпрессии, а не по сжатому Content-Length
 
     /**
      * Заголовок Retry-After (HTTP 429/503): либо число секунд, либо HTTP-дата. Возвращаем секунды до
@@ -64,23 +65,33 @@ public static class SubscriptionFetcher
      * [route] — как открыть соединение для очередного URL: напрямую, через прокси (SOCKS/HTTP) или системный прокси.
      * Редиректы (в т.ч. http↔https) проходятся тем же способом.
      */
-    public static FetchResult fetch(string url, string userAgent, int timeoutMs, HttpRoute? route = null)
+    public static FetchResult fetch(string url, string userAgent, int timeoutMs, HttpRoute? route = null, int totalTimeoutMs = -1)
     {
         route ??= HttpRoute.DIRECT;
         var current = url;
         var redirects = 0;
         var hops = new List<string>();
+        // Даже прямой вызов без CascadeFetch ограничен по всей цепочке редиректов, а не только одним readTimeout.
+        var total = totalTimeoutMs > 0 ? totalTimeoutMs : (int)Math.Min(int.MaxValue, Math.Max(1, timeoutMs) * 2L);
+        var deadline = HttpUrlConnectionCompat.deadlineAfterMs(total);
         try
         {
             while (true)
             {
+                var remaining = HttpUrlConnectionCompat.remainingMs(deadline);
+                if (remaining == 0)
+                    return new FetchResult(
+                        ok: false, finalUrl: current, httpCode: -1, contentType: null,
+                        contentLength: -1, bodyBytes: 0, body: "",
+                        exceptionClass: "SocketTimeoutException", errorMessage: "Общий таймаут загрузки", redirectChain: hops);
                 hops.Add(current);
-                using var handler = route.CreateHandler(timeoutMs);
+                using var handler = route.CreateHandler(Math.Min(Math.Max(1, timeoutMs), remaining));
                 using var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
                 HttpResponseMessage resp;
                 try
                 {
-                    using var headersCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(Math.Max(1, timeoutMs) * 2L));
+                    var headersBudget = (int)Math.Min(Math.Max(1, timeoutMs) * 2L, remaining);
+                    using var headersCts = new CancellationTokenSource(TimeSpan.FromMilliseconds(headersBudget));
                     resp = http.SendAsync(HttpUrlConnectionCompat.Get(current, userAgent), HttpCompletionOption.ResponseHeadersRead, headersCts.Token)
                         .GetAwaiter().GetResult();
                 }
@@ -106,20 +117,26 @@ public static class SubscriptionFetcher
                     var contentType = resp.Content.Headers.ContentType?.ToString();
                     var contentLength = resp.Content.Headers.ContentLength ?? -1;
                     var retryAfter = parseRetryAfter(HttpUrlConnectionCompat.Header(resp, "Retry-After"));
-                    string body;
+                    byte[] received;
                     try
                     {
+                        if (contentLength > MAX_TEXT_BYTES) throw new HttpBodyTooLargeException(MAX_TEXT_BYTES);
                         var s = resp.Content.ReadAsStream();
-                        body = Encoding.UTF8.GetString(HttpUrlConnectionCompat.ReadAllWithReadTimeout(s, timeoutMs).GetAwaiter().GetResult());
+                        received = HttpUrlConnectionCompat.ReadAllWithReadTimeout(s, timeoutMs, MAX_TEXT_BYTES, deadline).GetAwaiter().GetResult();
                     }
-                    catch (Exception)
+                    catch (Exception e)
                     {
-                        body = "";
+                        return new FetchResult(
+                            ok: false, finalUrl: current, httpCode: code, contentType: contentType,
+                            contentLength: contentLength, bodyBytes: 0, body: "",
+                            exceptionClass: JavaExceptionNames.simpleName(e), errorMessage: JavaExceptionNames.message(e),
+                            redirectChain: hops, retryAfterSec: retryAfter);
                     }
+                    var body = Encoding.UTF8.GetString(received);
                     return new FetchResult(
                         ok: code is >= 200 and <= 299,
                         finalUrl: current, httpCode: code, contentType: contentType,
-                        contentLength: contentLength, bodyBytes: Encoding.UTF8.GetByteCount(body),
+                        contentLength: contentLength, bodyBytes: received.Length,
                         body: body, exceptionClass: null, errorMessage: null, redirectChain: hops,
                         retryAfterSec: retryAfter);
                 }
