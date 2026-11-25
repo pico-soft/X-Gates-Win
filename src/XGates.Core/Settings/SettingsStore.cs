@@ -296,12 +296,11 @@ public static class SettingsStore
         }
     }
 
-    /// <summary>Обновить и атомарно сохранить (temp→rename). Валидацию делает вызывающий (UI).</summary>
-    public static void update(Context context, AppSettings @new)
+    /// <summary>Атомарно сохранить и только после успеха применить. Валидацию делает вызывающий (UI).</summary>
+    public static bool update(Context context, AppSettings @new)
     {
         lock (Sync)
         {
-            _state.value = @new;
             try
             {
                 KJson.atomicWrite(file(context), Path.Combine(context.filesDir, TMP_NAME), KJson.encodeToString(@new));
@@ -309,10 +308,13 @@ public static class SettingsStore
             catch (Exception e)
             {
                 Log.w(TAG, "save failed", e);
+                return false;
             }
+            _state.value = @new;
+            return true;
         }
     }
 
     /// <summary>Сбросить всё к дефолтам.</summary>
-    public static void resetToDefaults(Context context) => update(context, DEFAULTS);
+    public static bool resetToDefaults(Context context) => update(context, DEFAULTS);
 }

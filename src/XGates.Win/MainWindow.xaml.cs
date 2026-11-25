@@ -418,6 +418,15 @@ public partial class MainWindow : Window
         renderStats();
     }
 
+    /// <summary>Любая ошибка записи видна пользователю; старое состояние остаётся действующим.</summary>
+    private bool saveSettings(AppSettings value)
+    {
+        if (SettingsStore.update(ctx, value)) return true;
+        MessageBox.Show(this, "Не удалось записать settings.json. Изменение не применено. Проверьте доступ к каталогу данных и свободное место.",
+            "X-Gates Win", MessageBoxButton.OK, MessageBoxImage.Error);
+        return false;
+    }
+
     /// <summary>Строки «Параметров» (SettingsRows): ввод сохраняется сразу, если значение годится (как в Android).</summary>
     private void buildParams()
     {
@@ -453,7 +462,7 @@ public partial class MainWindow : Window
                 {
                     if (row.commit(SettingsStore.current(), cb.IsChecked == true ? "true" : "false") is { } n)
                     {
-                        SettingsStore.update(ctx, n);
+                        saveSettings(n);
                         if (row.group == "Экономия трафика")
                         {
                             EconomyNet.applyNow(ctx);
@@ -472,7 +481,7 @@ public partial class MainWindow : Window
                 {
                     var n = row.commit(SettingsStore.current(), tb.Text);
                     tb.BorderBrush = n == null ? Brushes.Firebrick : normal;
-                    if (n != null && n != SettingsStore.current()) SettingsStore.update(ctx, n);
+                    if (n != null && n != SettingsStore.current()) saveSettings(n);
                     hint.Visibility = V(row.changed(SettingsStore.current()));
                 };
                 control = tb;
@@ -515,7 +524,7 @@ public partial class MainWindow : Window
                 head.Text = $"{title}: {labels[i]}";
                 if (i == committed) return;   // пишем раз на каждое новое деление (Пр.133.A)
                 committed = i;
-                SettingsStore.update(ctx, pick(SettingsStore.current(), i));
+                saveSettings(pick(SettingsStore.current(), i));
                 var now = SettingsStore.current();
                 topCost.Text = OptimizeBlock.topCostLine(now); checkCost.Text = OptimizeBlock.checkCostLine(now); total.Text = OptimizeBlock.totalLine(now);
                 // Состав строк меняется только при «перемер выкл ↔ вкл» — тогда пересобрать (не трогая ползунок на каждом делении).
@@ -545,7 +554,8 @@ public partial class MainWindow : Window
     {
         if (MessageBox.Show(this, "Вернуть все настройки к значениям по умолчанию? Подписки, стоп-лист и порты не затрагиваются.", "Сброс настроек",
                 MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK) return;
-        SettingsStore.resetToDefaults(ctx);
+        if (!SettingsStore.resetToDefaults(ctx))
+            MessageBox.Show(this, "Не удалось записать settings.json. Прежние настройки сохранены.", "X-Gates Win", MessageBoxButton.OK, MessageBoxImage.Error);
         loadSettings();
     }
 
@@ -710,7 +720,12 @@ public partial class MainWindow : Window
     {
         var err = XrayConfig.portsError(socks, http);
         if (err != null) { PortsStatus.Text = err; PortsStatus.Foreground = R("ErrorText"); return; }
-        WinSettingsStore.update(ctx, WinSettingsStore.current() with { socksPort = socks, httpPort = http });
+        if (!WinSettingsStore.update(ctx, WinSettingsStore.current() with { socksPort = socks, httpPort = http }))
+        {
+            PortsStatus.Foreground = R("ErrorText");
+            PortsStatus.Text = "Не удалось записать win_settings.json. Порты не изменены; прокси не перезапускался. Проверьте доступ к каталогу данных и свободное место.";
+            return;
+        }
         PortsStatus.Foreground = R("OkText");
         PortsStatus.Text = $"Сохранено: SOCKS5 127.0.0.1:{socks}, HTTP 127.0.0.1:{http}";
         HowToText.Text = howTo(socks, http);
@@ -725,7 +740,12 @@ public partial class MainWindow : Window
 
     private void OnDarkTheme(object sender, RoutedEventArgs e)
     {
-        WinSettingsStore.update(ctx, WinSettingsStore.current() with { darkTheme = DarkTheme.IsChecked == true });
+        if (!WinSettingsStore.update(ctx, WinSettingsStore.current() with { darkTheme = DarkTheme.IsChecked == true }))
+        {
+            DarkTheme.IsChecked = WinSettingsStore.current().darkTheme;
+            MessageBox.Show(this, "Не удалось записать win_settings.json. Тема не изменена.", "X-Gates Win", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
         WinTheme.apply();
         applyTheme();
         // Строки и журнал берут цвета из палитры при построении: сами они не перекрасятся.
@@ -737,7 +757,12 @@ public partial class MainWindow : Window
     private void OnTlsFragment(object sender, RoutedEventArgs e)
     {
         var on = TlsFragment.IsChecked == true;
-        WinSettingsStore.update(ctx, WinSettingsStore.current() with { tlsFragment = on });
+        if (!WinSettingsStore.update(ctx, WinSettingsStore.current() with { tlsFragment = on }))
+        {
+            TlsFragment.IsChecked = WinSettingsStore.current().tlsFragment;
+            TlsFragmentStatus.Text = "Не удалось записать win_settings.json. Настройка не изменена; прокси не перезапускался.";
+            return;
+        }
         TlsFragmentStatus.Text = on ? "Включено" : "Выключено";
         // Работающий туннель собран со старым конфигом.
         if (reconnectCurrent("смена настройки")) TlsFragmentStatus.Text += " · прокси перезапущен";
@@ -790,14 +815,14 @@ public partial class MainWindow : Window
         try { Autostart.set(LaunchAtLogin.IsChecked == true); }
         catch (Exception ex) { MessageBox.Show(this, $"Не удалось изменить автозапуск: {ex.Message}", "X-Gates Win"); }
         try { LaunchAtLogin.IsChecked = Autostart.isEnabled(); } catch (Exception) { }
-        SettingsStore.update(ctx, SettingsStore.current() with { startOnBoot = LaunchAtLogin.IsChecked == true });
+        saveSettings(SettingsStore.current() with { startOnBoot = LaunchAtLogin.IsChecked == true });
     }
     private void OnProtocolToggle(object sender, RoutedEventArgs e)
     {
         if (sender is not CheckBox { Tag: Protocol p } cb) return;
         var set = new HashSet<Protocol>(SettingsStore.current().allowedProtocols);
         if (cb.IsChecked == true) set.Add(p); else set.Remove(p);
-        SettingsStore.update(ctx, SettingsStore.current() with { allowedProtocols = set });
+        saveSettings(SettingsStore.current() with { allowedProtocols = set });
     }
 
     /// <summary>Одна кнопка на одном месте, как на Android: что она делает, решает [UpdateButton].</summary>

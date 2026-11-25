@@ -52,11 +52,11 @@ public static class WinSettingsStore
         if (XrayConfig.portsError(@new.socksPort, @new.httpPort) != null) return false;
         lock (Sync)
         {
-            _state.value = @new;
             try { KJson.atomicWrite(Path.Combine(context.filesDir, FILE_NAME), Path.Combine(context.filesDir, TMP_NAME), KJson.encodeToString(@new)); }
-            catch (Exception e) { Log.w(TAG, "save failed", e); }
+            catch (Exception e) { Log.w(TAG, "save failed", e); return false; }
+            _state.value = @new;
+            return true;
         }
-        return true;
     }
 
     /// <summary>Только тесты: вернуть дефолты в памяти.</summary>
