@@ -50,6 +50,13 @@ public sealed class SubscriptionsModel : IDisposable
     private void reload() => sources = SubscriptionManager.sources(context);
     private void reloadAndNotify() { reload(); registryChanged?.Invoke(); }
 
+    private bool stopFullTestForRegistryChange()
+    {
+        if (MonitorCoordinator.abortFullTestAndWait()) return true;
+        ui(() => status = "Проверка ещё завершается — повторите через несколько секунд");
+        return false;   // таймаут больше не разрешает менять реестр под живым тестом
+    }
+
     public SubscriptionsSnapshot snapshot() => new(sources, status, refreshing, SubscriptionManager.seedStatus.value);
 
     private static string plural(int n, string one, string few, string many)
@@ -96,7 +103,7 @@ public sealed class SubscriptionsModel : IDisposable
 
     public void onImportFile(string path) => KThread.start(() =>
     {
-        MonitorCoordinator.abortFullTestAndWait();   // Промпт 93.E: не менять реестр под идущим тестом
+        if (!stopFullTestForRegistryChange()) return;   // Промпт 93.E: не менять реестр под идущим тестом
         string body;
         try { body = File.ReadAllText(path); } catch (Exception) { body = ""; }
         if (body.IsBlank()) { ui(() => status = "Файл пуст или не читается"); return; }
@@ -110,7 +117,7 @@ public sealed class SubscriptionsModel : IDisposable
         if (url.IsBlank()) { ui(() => status = "Вставьте адрес подписки"); return; }
         KThread.start(() =>
         {
-            MonitorCoordinator.abortFullTestAndWait();   // Промпт 93.E: сначала остановить тест, потом менять реестр
+            if (!stopFullTestForRegistryChange()) return;   // Промпт 93.E: сначала остановить тест, потом менять реестр
             var id = SubscriptionManager.addUrl(context, url, name);
             if (id == null) { ui(() => { status = "Такая подписка уже есть"; reloadAndNotify(); }); return; }
             var s = SubscriptionManager.refreshOne(context, id);
@@ -123,7 +130,7 @@ public sealed class SubscriptionsModel : IDisposable
         if (text.IsBlank()) { ui(() => status = "Вставьте ссылки"); return; }
         KThread.start(() =>
         {
-            MonitorCoordinator.abortFullTestAndWait();   // Промпт 93.E
+            if (!stopFullTestForRegistryChange()) return;   // Промпт 93.E
             var (_, s) = SubscriptionManager.addLocalFromBody(context, text);
             ui(() => { status = addedText(s); reloadAndNotify(); });
         }, "add-paste");
@@ -136,7 +143,7 @@ public sealed class SubscriptionsModel : IDisposable
         refreshing = true; status = "Обновляю…";
         KThread.start(() =>
         {
-            MonitorCoordinator.abortFullTestAndWait();   // Промпт 93.E: не обновлять реестр под идущим тестом
+            if (!stopFullTestForRegistryChange()) { ui(() => refreshing = false); return; }   // Промпт 93.E
             var res = SubscriptionManager.refreshAllEnabled(context, cancelled: () => false, onEach: (_, _) => ui(reload));
             var okN = res.Values.Count(it => it.ok); var failN = res.Values.Count(it => !it.ok);
             ui(() => { refreshing = false; status = refreshedText(okN, failN); reloadAndNotify(); });
@@ -145,12 +152,17 @@ public sealed class SubscriptionsModel : IDisposable
 
     public void onToggle(string id, bool enabled) => KThread.start(() =>
     {
-        MonitorCoordinator.abortFullTestAndWait();
+        if (!stopFullTestForRegistryChange()) return;
         SubscriptionManager.setEnabled(context, id, enabled);
         ui(reloadAndNotify);
     }, "toggle-source");
 
-    public void rename(string id, string name) => ui(() => { SubscriptionManager.rename(context, id, name); reloadAndNotify(); });
+    public void rename(string id, string name) => KThread.start(() =>
+    {
+        if (!stopFullTestForRegistryChange()) return;
+        SubscriptionManager.rename(context, id, name);
+        ui(reloadAndNotify);
+    }, "rename-source");
 
     /// <summary>Текст подтверждения удаления (как в диалоге Android).</summary>
     public string deleteConfirmText(SubSource src) =>
@@ -158,7 +170,7 @@ public sealed class SubscriptionsModel : IDisposable
 
     public void remove(string id) => KThread.start(() =>
     {
-        MonitorCoordinator.abortFullTestAndWait();
+        if (!stopFullTestForRegistryChange()) return;
         SubscriptionManager.remove(context, id);
         ui(reloadAndNotify);
     }, "remove-source");

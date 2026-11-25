@@ -311,6 +311,35 @@ public sealed class ServiceAndFullTestIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void Cancel_during_ping_completes_exactly_once()
+    {
+        // Адреса-«чёрные дыры» держат этап ping: ServerTester при отмене специально не зовёт onFinish.
+        var holes = Enumerable.Range(1, 96).Select(i => $"vless://{LocalTestNet.Uuid}@10.255.255.{i}:443?type=tcp&security=none#hole{i}");
+        SubscriptionManager.init(ctx);
+        var (_, imported) = SubscriptionManager.addLocalFromBody(ctx, string.Join("\n", holes), "holes");
+        Assert.True(imported.ok, imported.error);
+        var done = 0;
+        FullTestRunner.Result? result = null;
+        using var fin = new ManualResetEventSlim();
+        var h = FullTestRunner.run(ctx, SubscriptionManager.allServers(ctx),
+            onPhase: _ => { }, connect: _ => { },
+            onDone: r => { result = r; Interlocked.Increment(ref done); fin.Set(); });
+        try
+        {
+            h.cancel();
+            h.cancel();   // повторная отмена не должна ни повторить onDone, ни сорвать чужой замер
+            Assert.True(fin.Wait(2_000), "отмена на ping не довела onDone до вызывающего");
+            Assert.True(result!.cancelled);
+            Assert.Equal(1, done);
+        }
+        finally
+        {
+            h.cancel();
+            ServerSpeedTester.resetMeasureAbort();
+        }
+    }
+
+    [Fact]
     public void FullTest_connects_alive_and_skips_dead()
     {
         int a = net.StartVlessServer(), b = net.StartVlessServer(), dead = LocalTestNet.FreePort();

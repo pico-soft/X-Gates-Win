@@ -1,5 +1,6 @@
 using XGates.App;
 using XGates.Core.Crash;
+using XGates.Core.Monitor;
 using XGates.Core.Platform;
 using XGates.Core.Settings;
 using XGates.Core.Subscription;
@@ -86,6 +87,26 @@ public sealed class SubscriptionsAndBootstrapTests : IDisposable
 
         m.onRefreshAll();   // подписок с URL не осталось
         Assert.True(WaitUntil(() => Snap(m).status == "Нет включённых подписок для обновления", 5_000), Snap(m).status);
+    }
+
+    [Fact]
+    public void Failed_full_test_abort_does_not_change_registry()
+    {
+        SubscriptionManager.init(ctx);
+        using var m = new SubscriptionsModel(ctx, ui);
+        MonitorCoordinator.fullTestRunning = true;
+        MonitorCoordinator.fullTestCancel = () => { };   // моделируем зависшую отмену: флаг не снимается
+        try
+        {
+            m.onAddPaste($"vless://{LocalTestNet.Uuid}@127.0.0.1:1001?type=tcp#a");
+            Assert.True(WaitUntil(() => Snap(m).status.Contains("ещё завершается"), 12_000), Snap(m).status);
+            Assert.Empty(SubscriptionManager.allServers(ctx));
+        }
+        finally
+        {
+            MonitorCoordinator.fullTestCancel = null;
+            MonitorCoordinator.fullTestRunning = false;
+        }
     }
 
     [Fact]

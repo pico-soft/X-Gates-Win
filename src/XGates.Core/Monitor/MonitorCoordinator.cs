@@ -33,12 +33,14 @@ public static class MonitorCoordinator
      * Очередь запутала бы («добавил — ничего не происходит, пока тест идёт»). Прерываем и ЖДЁМ реальной
      * остановки (флаг снимается в onDone теста), только потом меняем данные. Вызывать из ФОНОВОГО потока.
      */
-    public static void abortFullTestAndWait(long timeoutMs = 8000L)
+    /// <returns>true — тест не идёт и реестр можно менять; false — отмена не подтверждена за таймаут.</returns>
+    public static bool abortFullTestAndWait(long timeoutMs = 8000L)
     {
-        if (!fullTestRunning) return;
+        if (!fullTestRunning) return true;
         try { fullTestCancel?.Invoke(); } catch (Exception) { }
         var end = JavaSystem.currentTimeMillis() + timeoutMs;
         while (fullTestRunning && JavaSystem.currentTimeMillis() < end) Thread.Sleep(50);
+        return !fullTestRunning;
     }
 
     // Идёт перебор кандидатов монитором (он уже крутит temp-инстансы). Ступень 5 каскада не должна

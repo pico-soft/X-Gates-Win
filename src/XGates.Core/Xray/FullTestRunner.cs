@@ -382,6 +382,11 @@ public static class FullTestRunner
 
         return new HandleImpl(() =>
         {
+            // Отмена — ТОЖЕ терминальное состояние. ServerTester намеренно не зовёт onFinish при отмене,
+            // поэтому на этапе ping старый код вообще не доводил onDone до координатора/UI. Захватываем
+            // doneFired ДО побочных действий: повторный/опоздавший cancel завершённого теста не должен
+            // срывать замер следующего. Рабочие потоки позже вызовут finishOnce, но он уже нем.
+            if (Interlocked.CompareExchange(ref doneFired, 1, 0) != 0) return;
             Volatile.Write(ref cancelled, true);
             race?.cancel();
             pingHandle?.cancel();
@@ -389,6 +394,7 @@ public static class FullTestRunner
             // (measureSpeed активного/кандидата, приоритетный замер) висел бы до своего таймаута.
             // Рвём ИДУЩЕЕ соединение замера немедленно → «Прервать» действует за секунды, а не за минуты.
             try { ServerSpeedTester.abortCurrentMeasure(); } catch (Exception) { }
+            onDone(new Result(null, null, 0.0, pingByKey.Values.Count(v => v >= 0), true));
         });
     }
 }

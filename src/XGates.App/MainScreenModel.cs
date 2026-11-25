@@ -137,7 +137,9 @@ public sealed class MainScreenModel : IDisposable
     private Dictionary<string, long> speedResultsAt = new();
     private bool fullTesting;
     private FullTestRunner.Handle? fullHandle;
+    private long fullTestGeneration;
     private bool checking;
+    private long checkGeneration;
     private volatile bool checkCancel;
     private string checkStatus = "";
     private double? activeUploadMbps;
@@ -202,6 +204,10 @@ public sealed class MainScreenModel : IDisposable
 
     private void post(Action a) { if (!disposed) uiThread.post(a); }
     private void ui(Action a) => post(() => { a(); notifyChanged(); });
+    private bool fullCurrent(long generation) => Interlocked.Read(ref fullTestGeneration) == generation;
+    private void fullUi(long generation, Action a) => ui(() => { if (fullCurrent(generation)) a(); });
+    private bool checkCurrent(long generation) => Interlocked.Read(ref checkGeneration) == generation;
+    private void checkUi(long generation, Action a) => ui(() => { if (checkCurrent(generation)) a(); });
     private void notifyChanged() { try { changed?.Invoke(); } catch (Exception e) { Log.w("MainScreenModel", "changed", e); } }
     private void onAnyChanged(object? _) => post(notifyChanged);
     private void onHealthChanged(object? _) => post(() =>
@@ -408,18 +414,23 @@ public sealed class MainScreenModel : IDisposable
     {
         if (fullTesting) return;
         // Пр.142: «Самый быстрый» БЕЗАКЦЕПТНО перебивает идущую проверку.
-        if (checking) { checkCancel = true; ServerSpeedTester.abortCurrentMeasure(); checking = false; MonitorCoordinator.fullTestRunning = false; }
+        if (checking)
+        {
+            Interlocked.Increment(ref checkGeneration);   // старый finally больше не владеет общими флагами
+            checkCancel = true; ServerSpeedTester.abortCurrentMeasure(); checking = false; MonitorCoordinator.fullTestRunning = false;
+        }
         checkStatus = "";
         IReadOnlyList<ServerProfile> all;
         if (serverList != null) all = serverList;
         else { servers = SubscriptionManager.allServers(context); all = servers; }
         if (all.Count == 0) { subStatus = "нет серверов"; return; }
         quickRace?.cancel();   // у теста своя гонка: две подключали бы друг друга по очереди
+        var generation = Interlocked.Increment(ref fullTestGeneration);
         fullTesting = true;
         testStartedMs = minuteFloor(JavaSystem.currentTimeMillis());
         MonitorCoordinator.fullTestRunning = true;   // монитор молчит, пока идёт ручной тест
         // (Android: CPU-wakelock на время теста — на Windows не нужен, процесс не замораживают.)
-        MonitorCoordinator.fullTestCancel = () => fullHandle?.cancel();
+        MonitorCoordinator.fullTestCancel = () => { if (fullCurrent(generation)) fullHandle?.cancel(); };
         MonitorCoordinator.wake();
         CrashContext.set("полный тест: старт");
         TestProgress.startIndeterminate("запуск…");
@@ -428,29 +439,31 @@ public sealed class MainScreenModel : IDisposable
         fullHandle = FullTestRunner.run(
             context: context,
             allServers: all,
-            onPhase: ph => { TestProgress.phase(ph); CrashContext.set($"тест: {ph}"); },
-            emitProgress: (done, total) => TestProgress.progress(done, total),
-            onPingResult: (p, ms) =>
+            onPhase: ph => fullUi(generation, () => { TestProgress.phase(ph); CrashContext.set($"тест: {ph}"); }),
+            emitProgress: (done, total) => fullUi(generation, () => TestProgress.progress(done, total)),
+            onPingResult: (p, ms) => fullUi(generation, () =>
             {
                 var k = SubscriptionManager.serverKey(p);
-                ui(() => { pingResults = new(pingResults) { [k] = ms }; pingResultsAt = new(pingResultsAt) { [k] = JavaSystem.currentTimeMillis() }; });
-            },
-            onSpeedResult: (p, mbps, full) =>
+                pingResults = new(pingResults) { [k] = ms }; pingResultsAt = new(pingResultsAt) { [k] = JavaSystem.currentTimeMillis() };
+            }),
+            onSpeedResult: (p, mbps, full) => fullUi(generation, () =>
             {
                 var k = SubscriptionManager.serverKey(p);
-                ui(() =>
-                {
-                    speedResults = new(speedResults) { [k] = mbps };
-                    speedResultsFull = new(speedResultsFull) { [k] = full };
-                    speedResultsAt = new(speedResultsAt) { [k] = JavaSystem.currentTimeMillis() };
-                });
-            },
-            connect: p => ui(() => startServer(p)),
-            onDone: r => ui(() =>
+                speedResults = new(speedResults) { [k] = mbps };
+                speedResultsFull = new(speedResultsFull) { [k] = full };
+                speedResultsAt = new(speedResultsAt) { [k] = JavaSystem.currentTimeMillis() };
+            }),
+            connect: p => fullUi(generation, () => startServer(p)),
+            onDone: r => fullUi(generation, () =>
             {
                 var pSnap = pingResults; var sSnap = speedResults; var sfSnap = speedResultsFull;   // снимок на ui
                 KThread.start(() =>
                 {
+                    if (r.cancelled)
+                    {
+                        Thread.Sleep(1200);                    // дать прерванному замеру закрыть соединение
+                        ServerSpeedTester.resetMeasureAbort(); // общий выход: монитор не остаётся «нем»
+                    }
                     SubscriptionManager.applyPingResults(context, pSnap);
                     SubscriptionManager.applySpeedResultsTagged(context, sSnap.ToDictionary(kv => kv.Key, kv => (kv.Value, sfSnap.TryGetValue(kv.Key, out var f) ? f : true)));
                     ui(() =>
@@ -461,6 +474,7 @@ public sealed class MainScreenModel : IDisposable
                         TestProgress.finish(r.cancelled ? "Отменено" : r.connected != null ? "Готово" : "Готово · рабочих серверов не нашлось");
                         reloadServers();
                         clearSessionResults();
+                        Interlocked.Increment(ref fullTestGeneration);   // поздние ping/speed/phase этого прогона больше немы
                         if (!r.cancelled) { liveFloorMs = testStartedMs; LiveListPrefs.setFloorMs(context, liveFloorMs); }
                         // Активный — реальную скорость на плашку СРАЗУ (не ждём цикл монитора).
                         if (!r.cancelled && r.connected != null)
@@ -480,7 +494,11 @@ public sealed class MainScreenModel : IDisposable
     private void onFastestNow()
     {
         if (fullTesting || refreshingSubs) return;
-        if (checking) { checkCancel = true; ServerSpeedTester.abortCurrentMeasure(); checking = false; MonitorCoordinator.fullTestRunning = false; checkStatus = ""; }
+        if (checking)
+        {
+            Interlocked.Increment(ref checkGeneration);
+            checkCancel = true; ServerSpeedTester.abortCurrentMeasure(); checking = false; MonitorCoordinator.fullTestRunning = false; checkStatus = "";
+        }
         var hasUrl = sources.Any(it => it.enabled && it.url.IsNotBlank());
         if (hasUrl) { connectFirstAlive("самый быстрый: первый живой"); onRefreshAllNow(onComplete: () => onFullTestNow(null)); }
         else onFullTestNow(null);
@@ -491,20 +509,9 @@ public sealed class MainScreenModel : IDisposable
 
     private void onCancelFullNow()
     {
-        fullHandle?.cancel(); fullHandle = null;   // Пр.123.D: cancel() рвёт и ИДУЩИЙ замер
-        fullTesting = false;
-        MonitorCoordinator.fullTestRunning = false;
-        MonitorCoordinator.fullTestCancel = null;
-        TestProgress.finish("отменено");
-        var pSnap = pingResults; var sSnap = speedResults;
-        KThread.start(() =>
-        {
-            Thread.Sleep(1200);                       // дать прерванному замеру закрыть соединение
-            ServerSpeedTester.resetMeasureAbort();    // Пр.123.D: вернуть замеры — иначе монитор остаётся «нем»
-            SubscriptionManager.applyPingResults(context, pSnap);
-            SubscriptionManager.applySpeedResults(context, sSnap);
-            ui(() => { reloadServers(); clearSessionResults(); });
-        }, "cancel-full");
+        // Единый выход — onDone в onFullTestNow: там же снимаются флаги, сохраняются частичные результаты
+        // и возвращаются замеры монитора. Здесь второй cleanup не нужен и раньше гонялся с onDone.
+        fullHandle?.cancel();   // Пр.123.D: cancel() рвёт и ИДУЩИЙ замер
     }
 
     /// <summary>
@@ -519,6 +526,7 @@ public sealed class MainScreenModel : IDisposable
         if (fullTesting || refreshingSubs) { checkStatus = "идёт другой тест — подождите"; return; }
         var curKey = ProxyState.state.value.serverKey;
         if (!ProxyState.state.value.running || curKey == null) { checkStatus = "Прокси не запущен — нажмите «Самый быстрый»"; return; }
+        var generation = Interlocked.Increment(ref checkGeneration);
         checking = true; checkCancel = false; checkStatus = "Проверяю сервер…";
         ServerSpeedTester.resetMeasureAbort();
         MonitorCoordinator.fullTestRunning = true;   // монитор молчит, пока меряем активный
@@ -529,34 +537,34 @@ public sealed class MainScreenModel : IDisposable
             var iterate = false;   // текущий мёртв/без трафика/медленный → в finally перебор последних живых
             try
             {
-                if (!NetworkMonitor.directAlive()) { ui(() => checkStatus = "Нет интернета — проверка невозможна"); return; }
+                if (!NetworkMonitor.directAlive()) { checkUi(generation, () => checkStatus = "Нет интернета — проверка невозможна"); return; }
                 var pingMs = cur != null ? ServerTester.ping(context, cur) : -1L;
-                if (checkCancel) { ui(() => checkStatus = ""); return; }
+                if (!checkCurrent(generation) || checkCancel) { checkUi(generation, () => checkStatus = ""); return; }
                 SubscriptionManager.applyPingResults(context, new Dictionary<string, int> { [curKey] = (int)pingMs });
                 if (pingMs < 0)
                 {
-                    ui(() => checkStatus = "Текущий сервер не отвечает — перебираю живые…");
+                    checkUi(generation, () => checkStatus = "Текущий сервер не отвечает — перебираю живые…");
                     iterate = true; return;
                 }
-                ui(() => checkStatus = $"Сервер жив (пинг {pingMs} мс) — быстрый замер…");
+                checkUi(generation, () => checkStatus = $"Сервер жив (пинг {pingMs} мс) — быстрый замер…");
                 var minimal = ServerSpeedTester.measureActiveDownloadMinimal(context);
-                if (checkCancel) { ui(() => checkStatus = ""); return; }
+                if (!checkCurrent(generation) || checkCancel) { checkUi(generation, () => checkStatus = ""); return; }
                 if (minimal < 0.5)
                 {
-                    ui(() => checkStatus = $"Сервер жив (пинг {pingMs} мс), но трафик не идёт — перебираю живые…");
+                    checkUi(generation, () => checkStatus = $"Сервер жив (пинг {pingMs} мс), но трафик не идёт — перебираю живые…");
                     iterate = true; return;
                 }
-                ui(() => checkStatus = $"Сервер жив (пинг {pingMs} мс, ~{fmt(minimal)}) — точный замер…");
+                checkUi(generation, () => checkStatus = $"Сервер жив (пинг {pingMs} мс, ~{fmt(minimal)}) — точный замер…");
                 var down = ServerSpeedTester.measureActiveDownloadStaged(context);
-                if (checkCancel) { ui(() => checkStatus = ""); return; }
+                if (!checkCurrent(generation) || checkCancel) { checkUi(generation, () => checkStatus = ""); return; }
                 var up = ServerSpeedTester.measureActiveUploadMbps(context);
-                if (checkCancel) { ui(() => checkStatus = ""); return; }
+                if (!checkCurrent(generation) || checkCancel) { checkUi(generation, () => checkStatus = ""); return; }
                 if (down >= 1.0)
                 {
                     SubscriptionManager.applySpeedResultsTagged(context, new Dictionary<string, (double, bool)> { [curKey] = (down, true) });
                     TunnelSpeed.setProbe(TunnelSpeed.snapshot().directDownMbps, down, up > 0 ? up : 0.0, JavaSystem.currentTimeMillis(), curKey);
                     TunnelHealth.ok(TunnelHealth.snapshot().ip, JavaSystem.currentTimeMillis(), curKey);
-                    ui(() =>
+                    checkUi(generation, () =>
                     {
                         speedResults = new(speedResults) { [curKey] = down };
                         speedResultsFull = new(speedResultsFull) { [curKey] = true };
@@ -568,17 +576,17 @@ public sealed class MainScreenModel : IDisposable
                 else
                 {
                     SubscriptionManager.applySpeedResultsTagged(context, new Dictionary<string, (double, bool)> { [curKey] = (down, true) });
-                    ui(() => checkStatus = $"Текущий медленный (↓{fmt(down)} < 1 Мбит/с) — перебираю живые…");
+                    checkUi(generation, () => checkStatus = $"Текущий медленный (↓{fmt(down)} < 1 Мбит/с) — перебираю живые…");
                     iterate = true;
                 }
             }
             catch (Exception e)
             {
-                ui(() => checkStatus = $"Ошибка проверки: {e.Message}");
+                checkUi(generation, () => checkStatus = $"Ошибка проверки: {e.Message}");
             }
             finally
             {
-                ui(() =>
+                checkUi(generation, () =>
                 {
                     checking = false; MonitorCoordinator.fullTestRunning = false; reloadServers(); clearSessionResults();
                     if (iterate && !checkCancel)

@@ -6,6 +6,7 @@ using XGates.Core.Settings;
 using XGates.Core.Subscription;
 using XGates.Core.Tests.Libv2ray;
 using XGates.Core.Xray;
+using XGates.Core.Xray.Link;
 
 namespace XGates.Core.Tests.App;
 
@@ -79,6 +80,17 @@ public sealed class MainScreenModelTests : IDisposable
         model = new MainScreenModel(ctx, ui);
     }
 
+    private ServerProfile ImportWithHoles()
+    {
+        var port = net.StartVlessServer();
+        var good = $"vless://{LocalTestNet.Uuid}@127.0.0.1:{port}?type=tcp&security=none#good";
+        var holes = Enumerable.Range(1, 96).Select(i => $"vless://{LocalTestNet.Uuid}@10.255.255.{i}:443?type=tcp&security=none#hole{i}");
+        var (_, imported) = SubscriptionManager.addLocalFromBody(ctx, string.Join("\n", holes.Prepend(good)), "local");
+        Assert.True(imported.ok, imported.error);
+        model = new MainScreenModel(ctx, ui);
+        return SubscriptionManager.allServers(ctx).Single(it => it.address == "127.0.0.1");
+    }
+
     private bool WaitTestDone(int ms = 120_000) => WaitUntil(() => { var s = Snap(); return !s.fullTesting && !s.refreshingSubs && !TestProgress.state.value.active; }, ms);
 
     [Fact]
@@ -108,6 +120,113 @@ public sealed class MainScreenModelTests : IDisposable
         Assert.DoesNotContain(s.alive, r => r.name == "srv0");
         var deadRow = Assert.Single(s.all, r => r.name == "srv0");
         Assert.Equal(-1, deadRow.pingMs);       // пинг ✗ сохранён в реестр
+    }
+
+    [Fact]
+    public void Cancel_full_test_finishes_through_common_done_path()
+    {
+        var holes = Enumerable.Range(1, 96).Select(i => $"vless://{LocalTestNet.Uuid}@10.255.255.{i}:443?type=tcp&security=none#hole{i}");
+        var (_, imported) = SubscriptionManager.addLocalFromBody(ctx, string.Join("\n", holes), "holes");
+        Assert.True(imported.ok, imported.error);
+        model = new MainScreenModel(ctx, ui);
+
+        model.onFullTest();
+        Assert.True(WaitUntil(() => Snap().fullTesting, 5_000), "тест не стартовал");
+        model.onCancel();
+
+        Assert.True(WaitTestDone(10_000), "общий onDone не завершил отмену: " + TestProgress.state.value.phase);
+        Assert.Equal("Отменено", TestProgress.state.value.phase);
+        Assert.False(MonitorCoordinator.fullTestRunning);
+        Assert.Null(MonitorCoordinator.fullTestCancel);
+    }
+
+    [Fact]
+    public void Cancelled_full_test_cannot_overlap_replacement()
+    {
+        var p = ImportWithHoles();
+        XrayProxyService.start(ctx, XrayConfigBuilder.build(p), ServerLabels.full(p), "missing-from-registry");
+        Assert.True(WaitUntil(() => ProxyState.state.value.running, 10_000), ProxyState.state.value.message);
+        TunnelHealth.ok("198.51.100.1", JavaSystem.currentTimeMillis(), "missing-from-registry");   // без FirstAliveRace
+        NetworkMonitor.ACTIVE_PROBE_CAP_MS = 100;
+
+        var (savedQuick, savedExact) = (FullTestRunner.measureQuick, FullTestRunner.measureExact);
+        var calls = 0;
+        using var firstMeasure = new ManualResetEventSlim();
+        using var secondMeasure = new ManualResetEventSlim();
+        using var firstRelease = new ManualResetEventSlim();
+        using var secondRelease = new ManualResetEventSlim();
+        FullTestRunner.measureQuick = (_, _) =>
+        {
+            var n = Interlocked.Increment(ref calls);
+            if (n == 1) { firstMeasure.Set(); firstRelease.Wait(30_000); }
+            else { secondMeasure.Set(); secondRelease.Wait(30_000); }
+            return 1.0;
+        };
+        FullTestRunner.measureExact = (_, _) => 1.0;
+        try
+        {
+            model!.onFullTest();
+            Assert.True(WaitUntil(() => Snap().fullTesting, 5_000), "тест не стартовал");
+            Assert.True(firstMeasure.Wait(15_000), "первый тест не дошёл до замера: " + TestProgress.state.value.phase);
+            model.onCancel();
+            model.onFullTest();   // старый onDone ещё сохраняет результаты: новый пока не должен начаться
+            Assert.False(secondMeasure.Wait(15_000), "новый тест дошёл до замера до завершения отменённого");
+
+            firstRelease.Set();
+            Assert.True(WaitTestDone(15_000), "отменённый тест не завершил общий хвост");
+            model.onFullTest();
+            Assert.True(secondMeasure.Wait(15_000), "после завершения отмены новый тест не стартовал");
+            secondRelease.Set();
+            Assert.True(WaitTestDone(30_000), "новый тест не завершился");
+        }
+        finally
+        {
+            firstRelease.Set(); secondRelease.Set();
+            NetworkMonitor.ACTIVE_PROBE_CAP_MS = 45_000L;
+            (FullTestRunner.measureQuick, FullTestRunner.measureExact) = (savedQuick, savedExact);
+        }
+    }
+
+    [Fact]
+    public void Interrupted_check_cannot_clear_new_full_test_state()
+    {
+        var p = ImportWithHoles();
+        XrayProxyService.start(ctx, XrayConfigBuilder.build(p), ServerLabels.full(p), "missing-from-registry");
+        Assert.True(WaitUntil(() => ProxyState.state.value.running, 10_000), ProxyState.state.value.message);
+        TunnelHealth.ok("198.51.100.1", JavaSystem.currentTimeMillis(), "missing-from-registry");   // без FirstAliveRace
+        NetworkMonitor.ACTIVE_PROBE_CAP_MS = 100;
+
+        var (savedQuick, savedExact) = (FullTestRunner.measureQuick, FullTestRunner.measureExact);
+        using var checkEntered = new ManualResetEventSlim();
+        using var checkRelease = new ManualResetEventSlim();
+        using var fullMeasure = new ManualResetEventSlim();
+        using var fullRelease = new ManualResetEventSlim();
+        NetworkMonitor.directAliveOverrideForTest = () => { checkEntered.Set(); checkRelease.Wait(30_000); return true; };
+        FullTestRunner.measureQuick = (_, _) => { fullMeasure.Set(); fullRelease.Wait(30_000); return 1.0; };
+        FullTestRunner.measureExact = (_, _) => 1.0;
+        try
+        {
+            model!.onCheck();
+            Assert.True(checkEntered.Wait(10_000), "проверка не дошла до блокирующей пробы");
+            model.onFastest();
+            Assert.True(WaitUntil(() => Snap().fullTesting, 5_000), "полный тест не начался");
+            Assert.True(fullMeasure.Wait(15_000), "полный тест не стартовал: " + TestProgress.state.value.phase);
+
+            checkRelease.Set();
+            Thread.Sleep(500);   // curKey отсутствует в реестре: старому finally нечего больше ждать
+            Assert.True(Snap().fullTesting);
+            Assert.True(MonitorCoordinator.fullTestRunning, "старый finally снял флаг нового полного теста");
+
+            fullRelease.Set();
+            Assert.True(WaitTestDone(30_000), "полный тест не завершился");
+        }
+        finally
+        {
+            checkRelease.Set(); fullRelease.Set();
+            NetworkMonitor.directAliveOverrideForTest = () => true;
+            NetworkMonitor.ACTIVE_PROBE_CAP_MS = 45_000L;
+            (FullTestRunner.measureQuick, FullTestRunner.measureExact) = (savedQuick, savedExact);
+        }
     }
 
     [Fact]
