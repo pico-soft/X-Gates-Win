@@ -239,8 +239,8 @@ public sealed class UpdateFlowIntegrationTests : IDisposable
         Assert.IsType<UpdateFlowController.Phase.Installing>(UpdateFlowController.phase.value);
         Assert.Equal(rel.msi, File.ReadAllBytes(launched!));
         Assert.Equal(1, exits);
-        Assert.Equal(7, UpdateStore.record.value.dismissedCode);   // полоса снята для этой версии
-        Assert.Null(UpdateStore.bannerVersion(notifyOn: true));
+        Assert.Equal(0, UpdateStore.record.value.dismissedCode);      // launcher стартовал ≠ новая версия установлена
+        Assert.Equal((7, "0.7 beta"), UpdateStore.bannerVersion(notifyOn: true));
         Assert.Contains(NotificationHelper.Kind.UPDATE, sink.cancelled);
     }
 
@@ -271,6 +271,36 @@ public sealed class UpdateFlowIntegrationTests : IDisposable
         Assert.Equal(UpdateErrorKind.INSTALL_FAILED.text(), f.message);
         Assert.Equal(0, exits);
         Assert.Equal((7, "0.7 beta"), UpdateStore.bannerVersion(notifyOn: true));   // не гасим полосу авансом
+    }
+
+    [Fact]
+    public void Windows_launcher_command_captures_msi_exit_code_after_wait()
+    {
+        const string msi = @"C:\Data\X-Gates\new setup.msi";
+        const string exe = @"C:\Programs\X-Gates Win\XGatesWin.exe";
+
+        var args = UpdateInstaller.windowsLauncherArguments(msi, exe);
+
+        Assert.StartsWith("/v:on /c start \"\" /wait msiexec", args);
+        Assert.Contains($"\"{msi}\"", args);
+        Assert.Contains("set \"code=!ERRORLEVEL!\"", args);   // delayed expansion — после msiexec, не при разборе строки
+        Assert.Contains("if \"!code!\"==\"0\"", args);
+        Assert.Contains($"\"{exe}\" {UpdateInstaller.FAILED_ARG} !code!", args);
+        Assert.DoesNotContain("%ERRORLEVEL%", args);
+    }
+
+    [Fact]
+    public void Msi_failure_is_carried_to_restarted_old_version()
+    {
+        Assert.Equal(1603, UpdateFlowController.installFailureCode([UpdateInstaller.FAILED_ARG, "1603"]));
+        Assert.Null(UpdateFlowController.installFailureCode([UpdateInstaller.FAILED_ARG]));
+        Assert.Null(UpdateFlowController.installFailureCode([UpdateInstaller.FAILED_ARG, "not-a-code"]));
+
+        UpdateFlowController.reportInstallFailure(1603);
+
+        var failed = Assert.IsType<UpdateFlowController.Phase.Failed>(UpdateFlowController.phase.value);
+        Assert.Contains("1603", failed.message);
+        Assert.Contains("не установлено", failed.message);
     }
 
     [Fact]

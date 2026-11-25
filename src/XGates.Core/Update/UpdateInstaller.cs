@@ -132,6 +132,16 @@ public static class UpdateInstaller
         }
     }
 
+    public const string FAILED_ARG = "--update-failed";
+
+    /// <summary>
+    /// Аргументы внешнего cmd: дождаться msiexec, затем открыть новую версию или вернуть старой её код отказа.
+    /// /v:on и !ERRORLEVEL! обязательны: обычное %ERRORLEVEL% cmd развернул бы до завершения установки.
+    /// </summary>
+    public static string windowsLauncherArguments(string msi, string exe) =>
+        $"/v:on /c start \"\" /wait msiexec /i \"{msi}\" /passive /norestart & set \"code=!ERRORLEVEL!\" & " +
+        $"if \"!code!\"==\"0\" (start \"\" \"{exe}\") else (start \"\" \"{exe}\" {FAILED_ARG} !code!)";
+
     private static void tryDelete(string f) { try { File.Delete(f); } catch (Exception) { } }
 }
 
@@ -177,6 +187,21 @@ public static class UpdateFlowController
     internal static bool isRunning => running;
 
     internal static void resetForTest() { _phase.value = new Phase.Idle(); readyFile = null; readyForCode = 0; }
+
+    /// <summary>Код отказа, переданный внешним launcher после завершения msiexec.</summary>
+    public static int? installFailureCode(IReadOnlyList<string> args)
+    {
+        for (var i = 0; i + 1 < args.Count; i++)
+            if (args[i] == UpdateInstaller.FAILED_ARG && int.TryParse(args[i + 1], out var code)) return code;
+        return null;
+    }
+
+    /// <summary>Старая версия перезапущена после отказа MSI: показать факт и оставить обновление доступным для повтора.</summary>
+    public static void reportInstallFailure(int code)
+    {
+        Log.w("UpdateFlowController", $"msiexec завершился с кодом {code}");
+        _phase.value = new Phase.Failed($"Обновление не установлено: установщик завершился с ошибкой (код {code}). Попробуйте ещё раз.");
+    }
 
     /// <summary>Тап по баннеру/кнопке. Идемпотентно: пока идёт — повторный тап игнорируется.</summary>
     public static void oneTap(Context context)
@@ -237,14 +262,15 @@ public static class UpdateFlowController
         }, "update-flow");
     }
 
-    /// <summary>Запустить установщик и закрыть приложение. Полосу/уведомление снимаем только если установщик РЕАЛЬНО стартовал.</summary>
+    /// <summary>Запустить установщик и закрыть приложение. Уведомление снимаем только если launcher РЕАЛЬНО стартовал.</summary>
     private static void install(Context app, string file)
     {
         bool started;
         try { started = launchInstaller(file); } catch (Exception) { started = false; }
         if (!started) { _phase.value = new Phase.Failed(UpdateErrorKind.INSTALL_FAILED.text()); return; }
         Service.NotificationHelper.cancelUpdate(app); Service.NotificationHelper.cancelInstall(app);
-        UpdateStore.markDismissed(app);
+        // Не dismissed: launcher стартовал, но MSI ещё не отработал. После успеха новая версия скроет полосу по versionCode;
+        // после отказа старая версия получит FAILED_ARG, а доступное обновление останется для повторной попытки.
         _phase.value = new Phase.Installing();
         exitApp();
     }

@@ -1,12 +1,14 @@
 using System.Diagnostics;
 using XGates.Core.Platform;
+using XGates.Core.Update;
 
 namespace XGates.Win;
 
 /// <summary>
 /// Запуск установщика обновления с последующим перезапуском приложения. Ядро (UpdateInstaller.startInstall) только
 /// запускает msiexec; здесь — через отдельный cmd: дождаться конца установки (start /wait) и открыть новую версию из
-/// того же места (MajorUpgrade ставит в тот же каталог). Само приложение после запуска закрывается (exitApp).
+/// того же места (MajorUpgrade ставит в тот же каталог). При ненулевом коде открывается старая версия с --update-failed.
+/// Само приложение после запуска закрывается (exitApp).
 /// </summary>
 public static class WinInstaller
 {
@@ -17,8 +19,8 @@ public static class WinInstaller
             var exe = Environment.ProcessPath ?? throw new InvalidOperationException("нет пути к exe");
             var psi = new ProcessStartInfo("cmd.exe")
             {
-                // cmd /c: строка начинается не с кавычки — cmd оставляет кавычки как есть.
-                Arguments = $"/c start \"\" /wait msiexec /i \"{msi}\" /passive /norestart & start \"\" \"{exe}\"",
+                // Внешний cmd ждёт msiexec и передаёт его код старой копии при отказе; см. windowsLauncherArguments.
+                Arguments = UpdateInstaller.windowsLauncherArguments(msi, exe),
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
