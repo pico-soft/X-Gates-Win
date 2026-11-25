@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 using XGates.Core.Compat;
+using XGates.Core.Crash;
 using XGates.Core.Monitor;
 using XGates.Core.Net;
 using XGates.Core.Platform;
@@ -1017,8 +1018,8 @@ public static partial class SubscriptionManager
             lastOkTs = ok ? ts : s.lastOkTs,
             lastOk = ok,
             lastOutcome = outcome,
-            lastError = ok ? null : error,
-            lastDetail = detail,
+            lastError = ok ? null : error == null ? null : Sanitizer.clean(error),
+            lastDetail = detail == null ? null : Sanitizer.clean(detail),
             retryAfterSec = outcome == SourceOutcome.RATE_LIMITED ? retryAfter : null,
         };
     }

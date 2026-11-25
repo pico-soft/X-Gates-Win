@@ -43,7 +43,7 @@ public sealed record SubSource
     [JsonPropertyName("lastOk")] public bool? lastOk { get; init; } = null;
     [JsonPropertyName("lastOutcome")] public SourceOutcome? lastOutcome { get; init; } = null;
     [JsonPropertyName("lastError")] public string? lastError { get; init; } = null;  // суть ошибки последней НЕУДАЧИ (очищается при успехе)
-    [JsonPropertyName("lastDetail")] public string? lastDetail { get; init; } = null;  // диагностика под тапом (URL/код/байты/тело-200/исключение)
+    [JsonPropertyName("lastDetail")] public string? lastDetail { get; init; } = null;  // диагностика под тапом (код/байты/исключение; URL и секреты маскируются)
     [JsonPropertyName("retryAfterSec")] public int? retryAfterSec { get; init; } = null;  // для RATE_LIMITED (сколько ждать)
     [JsonPropertyName("serverCount")] public int serverCount { get; init; } = 0;
     // Пр.140: источник «белого списка РФ» (Vless-Reality-White-Lists…). Такие держим в общем списке ВЫКЛ по

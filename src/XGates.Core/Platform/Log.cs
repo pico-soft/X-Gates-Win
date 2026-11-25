@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using XGates.Core.Crash;
 
 namespace XGates.Core.Platform;
 
@@ -35,8 +36,8 @@ public static class Log
     public static string Format(int priority, string tag, string msg, Exception? tr)
     {
         var sb = new StringBuilder();
-        sb.Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff")).Append(' ').Append(Letter(priority)).Append('/').Append(tag).Append(": ").Append(msg);
-        if (tr != null) sb.Append('\n').Append(tr);
+        sb.Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff")).Append(' ').Append(Letter(priority)).Append('/').Append(tag).Append(": ").Append(Sanitizer.clean(msg));
+        if (tr != null) sb.Append('\n').Append(Sanitizer.clean(tr.ToString()));
         return sb.ToString();
     }
 
