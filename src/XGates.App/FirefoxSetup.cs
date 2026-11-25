@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using XGates.Core.Platform;
@@ -44,6 +43,8 @@ public static partial class FirefoxSetup
     internal const string BEGIN = "// >>> X-Gates Win: Firefox proxy via X-Gates (undo: X-Gates Win > Settings > Restore)";
     internal const string END = "// <<< X-Gates Win";
     private const string STATE_FILE = "firefox_proxy.json";
+
+    internal static Action<string>? beforeWriteForTest;
 
     /// <summary>Каталоги с profiles.ini. Тесты подменяют на временные.</summary>
     public static Func<IReadOnlyList<string>> roots { get; set; } = defaultRoots;
@@ -146,10 +147,56 @@ public static partial class FirefoxSetup
         catch (Exception) { return null; }
     }
 
-    private static void saveState(Context ctx, State? s)
+    private sealed record FileChange(string path, string? before, string? after);
+    private sealed record ConfigurePlan(string userJs, string? before, string after);
+
+    private static string? readIfExists(string path) => File.Exists(path) ? File.ReadAllText(path) : null;
+
+    private static FileChange stateChange(Context ctx, State? s)
     {
-        if (s == null || s.profiles.Count == 0) { try { File.Delete(statePath(ctx)); } catch (Exception) { } return; }
-        File.WriteAllText(statePath(ctx), JsonSerializer.Serialize(s, new JsonSerializerOptions { WriteIndented = true }));
+        var after = s == null || s.profiles.Count == 0
+            ? null
+            : JsonSerializer.Serialize(s, new JsonSerializerOptions { WriteIndented = true });
+        return new FileChange(statePath(ctx), readIfExists(statePath(ctx)), after);
+    }
+
+    private static void writeChange(string path, string? text)
+    {
+        beforeWriteForTest?.Invoke(path);
+        if (text == null) { File.Delete(path); return; }
+        var tmp = path + ".xgates.tmp";
+        try { KJson.atomicWrite(path, tmp, text); }
+        catch (Exception)
+        {
+            try { File.Delete(tmp); } catch (Exception) { }
+            throw;
+        }
+    }
+
+    /// <summary>Записать набор как одну операцию: при отказе вернуть и прежние файлы, и прежний state.</summary>
+    private static bool commitFiles(IReadOnlyList<FileChange> changes, string operation, out string error)
+    {
+        var applied = 0;
+        try
+        {
+            for (; applied < changes.Count; applied++) writeChange(changes[applied].path, changes[applied].after);
+            error = "";
+            return true;
+        }
+        catch (Exception e)
+        {
+            var rollbackFailed = false;
+            // Сбойная атомарная запись не меняет target; возвращаем только успешно записанные файлы.
+            for (var i = applied - 1; i >= 0; i--)
+            {
+                try { writeChange(changes[i].path, changes[i].before); }
+                catch (Exception) { rollbackFailed = true; }
+            }
+            error = $"Не удалось {operation}: {e.Message}. " + (rollbackFailed
+                ? "Некоторые файлы восстановить не удалось; повторите операцию после проверки доступа к профилю Firefox."
+                : "Все изменения отменены, прежние файлы восстановлены.");
+            return false;
+        }
     }
 
     public static bool isConfigured(Context ctx) => loadState(ctx) is { profiles.Count: > 0 };
@@ -193,8 +240,6 @@ public static partial class FirefoxSetup
         return text[..b] + text[e..];
     }
 
-    private static readonly UTF8Encoding Utf8NoBom = new(false);
-
     // ─────────────────────────── действия ───────────────────────────
 
     /// <summary>«Настроить Firefox»: блок прокси в user.js профиля(ей); прежние значения запоминаются один раз.</summary>
@@ -203,16 +248,25 @@ public static partial class FirefoxSetup
         var found = findProfiles();
         if (found.Count == 0)
             return new Outcome(false, "Firefox не найден. Установите Firefox и запустите его один раз — потом нажмите «Настроить Firefox».");
-        var state = loadState(ctx) ?? new State();
-        var running = false;
+        var hadStateFile = File.Exists(statePath(ctx));
+        var state = loadState(ctx);
+        if (hadStateFile && state == null)
+            return new Outcome(false, "Файл состояния настройки Firefox повреждён. Ничего не изменено: иначе прежние настройки могли бы быть заменены текущими значениями прокси.");
+        state ??= new State();
+
+        // Сначала читаем ВСЕ профили и строим план. Ни один файл не меняется, пока не проведена вся подготовка.
+        var plans = new List<ConfigurePlan>();
         foreach (var p in found)
         {
             var userJs = Path.Combine(p.dir, "user.js");
             var ps = state.profiles.FirstOrDefault(x => x.dir == p.dir);
-            var text = File.Exists(userJs) ? File.ReadAllText(userJs) : "";
+            var before = readIfExists(userJs);
+            var text = before ?? "";
             if (ps == null)
             {
-                ps = new ProfileState { dir = p.dir, userJsExisted = File.Exists(userJs) };
+                if (text.Contains(BEGIN, StringComparison.Ordinal))
+                    return new Outcome(false, $"В профиле «{p.name}» уже есть блок X-Gates, но нет сохранённого исходного состояния. Ничего не изменено; сохраните user.js и восстановите его вручную.");
+                ps = new ProfileState { dir = p.dir, userJsExisted = before != null };
                 var prefs = Path.Combine(p.dir, "prefs.js");
                 if (File.Exists(prefs))
                     foreach (var line in File.ReadAllLines(prefs))
@@ -223,12 +277,16 @@ public static partial class FirefoxSetup
             else text = withoutBlock(text, ps.addedNewline);   // уже настроен — обновить блок (напр. новый порт)
             var nl = newlineOf(text);
             ps.addedNewline = text.Length > 0 && !text.EndsWith('\n');
-            File.WriteAllText(userJs, text + (ps.addedNewline ? nl : "") + block(socksPort, httpPort, nl), Utf8NoBom);
-            running |= profileInUse(p.dir);
+            plans.Add(new ConfigurePlan(userJs, before, text + (ps.addedNewline ? nl : "") + block(socksPort, httpPort, nl)));
         }
         state.port = socksPort;
         state.httpPort = httpPort;
-        saveState(ctx, state);
+
+        var changes = plans.Select(p => new FileChange(p.userJs, p.before, p.after)).ToList();
+        changes.Add(stateChange(ctx, state));                  // state — ПОСЛЕ профилей, отказ откатит их все
+        if (!commitFiles(changes, "настроить Firefox", out var error)) return new Outcome(false, error);
+
+        var running = found.Any(p => profileInUse(p.dir));
         var names = string.Join(", ", found.Select(p => $"«{p.name}»"));
         return new Outcome(true, $"Firefox настроен на X-Gates (HTTP и HTTPS 127.0.0.1:{httpPort}, SOCKS5 127.0.0.1:{socksPort}), профиль {names}. " +
             (running ? RESTART_TEXT : "Откройте Firefox."), running);
@@ -245,37 +303,42 @@ public static partial class FirefoxSetup
     /// <summary>«Вернуть как было»: убрать блок из user.js и вернуть прежние значения в prefs.js. Firefox должен быть закрыт.</summary>
     public static Outcome restore(Context ctx)
     {
+        var hadStateFile = File.Exists(statePath(ctx));
         var state = loadState(ctx);
+        if (hadStateFile && state == null)
+            return new Outcome(false, "Файл состояния настройки Firefox повреждён. Настройки профиля не изменены: без исходных значений безопасно восстановить их нельзя.");
         if (state is not { profiles.Count: > 0 }) return new Outcome(true, "Firefox не был настроен из X-Gates — возвращать нечего.");
         var busy = state.profiles.Where(p => Directory.Exists(p.dir) && profileInUse(p.dir)).ToList();
         if (busy.Count > 0)
             return new Outcome(false, "Закройте Firefox (все окна) и нажмите «Вернуть как было» ещё раз: открытый Firefox при выходе перезапишет настройки.");
-        foreach (var ps in state.profiles.ToList())
+
+        var changes = new List<FileChange>();
+        foreach (var ps in state.profiles)
         {
-            if (Directory.Exists(ps.dir))
+            if (!Directory.Exists(ps.dir)) continue;
+            var userJs = Path.Combine(ps.dir, "user.js");
+            var userBefore = readIfExists(userJs);
+            if (userBefore != null)
             {
-                var userJs = Path.Combine(ps.dir, "user.js");
-                if (File.Exists(userJs))
-                {
-                    var rest = withoutBlock(File.ReadAllText(userJs), ps.addedNewline);
-                    if (rest.Length == 0 && !ps.userJsExisted) File.Delete(userJs);
-                    else File.WriteAllText(userJs, rest, Utf8NoBom);
-                }
-                var prefs = Path.Combine(ps.dir, "prefs.js");
-                if (File.Exists(prefs))
-                {
-                    var text = File.ReadAllText(prefs);
-                    var nl = newlineOf(text);
-                    var kept = text.Split('\n').Select(l => l.TrimEnd('\r'))
-                        .Where(l => !(PrefLine().Match(l) is { Success: true } m && MANAGED.Contains(m.Groups["name"].Value))).ToList();
-                    while (kept.Count > 0 && kept[^1].Length == 0) kept.RemoveAt(kept.Count - 1);
-                    kept.AddRange(MANAGED.Where(ps.backup.ContainsKey).Select(n => $"user_pref(\"{n}\", {ps.backup[n]});"));
-                    File.WriteAllText(prefs, string.Join(nl, kept) + nl, Utf8NoBom);
-                }
+                var rest = withoutBlock(userBefore, ps.addedNewline);
+                var userAfter = rest.Length == 0 && !ps.userJsExisted ? null : rest;
+                if (userBefore != userAfter) changes.Add(new FileChange(userJs, userBefore, userAfter));
             }
-            state.profiles.Remove(ps);
+            var prefs = Path.Combine(ps.dir, "prefs.js");
+            var prefsBefore = readIfExists(prefs);
+            if (prefsBefore != null)
+            {
+                var nl = newlineOf(prefsBefore);
+                var kept = prefsBefore.Split('\n').Select(l => l.TrimEnd('\r'))
+                    .Where(l => !(PrefLine().Match(l) is { Success: true } m && MANAGED.Contains(m.Groups["name"].Value))).ToList();
+                while (kept.Count > 0 && kept[^1].Length == 0) kept.RemoveAt(kept.Count - 1);
+                kept.AddRange(MANAGED.Where(ps.backup.ContainsKey).Select(n => $"user_pref(\"{n}\", {ps.backup[n]});"));
+                var prefsAfter = string.Join(nl, kept) + nl;
+                if (prefsBefore != prefsAfter) changes.Add(new FileChange(prefs, prefsBefore, prefsAfter));
+            }
         }
-        saveState(ctx, state);
+        changes.Add(stateChange(ctx, null));                   // только после успешного восстановления всех профилей
+        if (!commitFiles(changes, "вернуть настройки Firefox", out var error)) return new Outcome(false, error);
         return new Outcome(true, "Готово: прокси в Firefox снят, прежние настройки возвращены. Откройте Firefox.");
     }
 

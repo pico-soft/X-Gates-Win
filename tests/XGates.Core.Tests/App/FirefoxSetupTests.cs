@@ -43,6 +43,7 @@ public sealed class FirefoxSetupTests : IDisposable
 
     public void Dispose()
     {
+        FirefoxSetup.beforeWriteForTest = null;
         FirefoxSetup.roots = savedRoots;
         try { Directory.Delete(root, true); } catch (IOException) { }
     }
@@ -130,6 +131,74 @@ public sealed class FirefoxSetupTests : IDisposable
         Assert.True(FirefoxSetup.restore(ctx).ok);
         Assert.False(File.Exists(Path.Combine(profile, "user.js")));       // файла не было — мы его и убрали
         Assert.Equal(PREFS_BEFORE.Replace("\r\n", "\n").TrimEnd('\n'), Prefs.Replace("\r\n", "\n").TrimEnd('\n'));
+    }
+
+    [Fact]
+    public void State_write_failure_rolls_back_userjs_and_leaves_no_configured_state()
+    {
+        var stateFile = Path.Combine(ctx.filesDir, "firefox_proxy.json");
+        FirefoxSetup.beforeWriteForTest = path =>
+        {
+            if (path == stateFile) throw new IOException("injected state write failure");
+        };
+
+        FirefoxSetup.Outcome? outcome = null;
+        var exception = Record.Exception(() => outcome = FirefoxSetup.configure(ctx, 10815, 10816));
+
+        Assert.Null(exception);
+        Assert.NotNull(outcome);
+        Assert.False(outcome.ok, outcome.text);
+        Assert.Equal(USERJS_BEFORE, UserJs);
+        Assert.False(File.Exists(stateFile));
+        Assert.False(FirefoxSetup.isConfigured(ctx));
+    }
+
+    [Fact]
+    public void Corrupt_state_blocks_reconfigure_without_duplicating_managed_block()
+    {
+        Assert.True(FirefoxSetup.configure(ctx, 10815, 10816).ok);
+        var configured = UserJs;
+        var stateFile = Path.Combine(ctx.filesDir, "firefox_proxy.json");
+        const string broken = "{ незаконченный json";
+        File.WriteAllText(stateFile, broken);
+
+        var outcome = FirefoxSetup.configure(ctx, 20815, 20816);
+
+        Assert.False(outcome.ok, outcome.text);
+        Assert.Equal(configured, UserJs);
+        Assert.Equal(broken, File.ReadAllText(stateFile));
+    }
+
+    [Fact]
+    public void Restore_failure_rolls_back_userjs_and_keeps_recovery_state()
+    {
+        Assert.True(FirefoxSetup.configure(ctx, 10815, 10816).ok);
+        var configured = UserJs;
+        var prefsFile = Path.Combine(profile, "prefs.js");
+        var configuredPrefs = PREFS_BEFORE
+            .Replace("user_pref(\"network.proxy.type\", 0);", "user_pref(\"network.proxy.type\", 1);")
+            .Replace("user_pref(\"network.proxy.http\", \"corp.proxy\");", "user_pref(\"network.proxy.http\", \"127.0.0.1\");")
+            .Replace("user_pref(\"network.proxy.http_port\", 3128);", "user_pref(\"network.proxy.http_port\", 10816);");
+        File.WriteAllText(prefsFile, configuredPrefs);   // Firefox применил user.js и записал действующие значения
+        var failOnce = true;
+        FirefoxSetup.beforeWriteForTest = path =>
+        {
+            if (path == prefsFile && failOnce)
+            {
+                failOnce = false;
+                throw new IOException("injected prefs write failure");
+            }
+        };
+
+        FirefoxSetup.Outcome? outcome = null;
+        var exception = Record.Exception(() => outcome = FirefoxSetup.restore(ctx));
+
+        Assert.Null(exception);
+        Assert.NotNull(outcome);
+        Assert.False(outcome.ok, outcome.text);
+        Assert.Equal(configured, UserJs);
+        Assert.Equal(configuredPrefs, Prefs);
+        Assert.True(FirefoxSetup.isConfigured(ctx));
     }
 
     [Fact]
