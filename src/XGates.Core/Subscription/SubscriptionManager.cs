@@ -48,6 +48,8 @@ public static partial class SubscriptionManager
 {
     private const string TAG = "SubscriptionManager";
 
+    internal static Action? beforeRefreshCommitForTest;
+
     /** Дефолтная подписка «из коробки» (Промпт 72). Публичный список конфигов для обхода в РФ. */
     public const string DEFAULT_SOURCE_URL = "https://raw.githack.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt";
     public const string DEFAULT_SOURCE_NAME = "Обход ограничений в РФ по-умолчанию";
@@ -107,13 +109,19 @@ public static partial class SubscriptionManager
         var cur = SubscriptionStore.load(context);
         if (!cur.migratedLegacy)
         {
-            var legacy = SubscriptionStore.readLegacy(context);
-            var migrated = legacy.Count > 0 ? convertLegacy(legacy) : freshDefault();
-            SubscriptionStore.save(context, recount(migrated));
+            SubscriptionStore.update(context, current =>
+            {
+                if (current.migratedLegacy) return current;
+                var legacy = SubscriptionStore.readLegacy(context);
+                var migrated = legacy.Count > 0 ? convertLegacy(legacy) : freshDefault();
+                return recount(migrated);
+            });
         }
         var f = SubscriptionStore.load(context);
         if (!f.seededDefaultRuBypass && f.sources.Count > 0)
-            SubscriptionStore.save(context, f with { seededDefaultRuBypass = true });
+            SubscriptionStore.update(context, current => !current.seededDefaultRuBypass && current.sources.Count > 0
+                ? current with { seededDefaultRuBypass = true }
+                : current);
         // Пр.140: добавить источники белого списка (ВЫКЛ) существующим установкам, у кого их ещё нет. Только
         // метаданные (URL) — тела подтянет авто-рефреш раз в полчаса. На свежей установке их сеет trySeedDefaultSource.
         runCatching(() => ensureWhiteListSources(context));
@@ -155,7 +163,9 @@ public static partial class SubscriptionManager
         if (file.seededDefaultRuBypass) return false;
         if (file.sources.Count > 0)                       // у юзера уже есть свои → дефолт не навязываем
         {
-            SubscriptionStore.save(context, file with { seededDefaultRuBypass = true });
+            SubscriptionStore.update(context, current => current.seededDefaultRuBypass || current.sources.Count == 0
+                ? current
+                : current with { seededDefaultRuBypass = true });
             _seedStatus.value = new SeedStatus(attempted: true, error: "");
             return false;
         }
@@ -173,29 +183,36 @@ public static partial class SubscriptionManager
         {
             var reason = seedFailReason(cascade);
             Log.w(TAG, $"посев дефолтной подписки не удался: {reason}");
-            SubscriptionStore.save(context, SubscriptionStore.load(context) with { seedLastError = reason, seedLastAttemptTs = now() });
+            SubscriptionStore.update(context, current => current with { seedLastError = reason, seedLastAttemptTs = now() });
             _seedStatus.value = new SeedStatus(attempted: true, error: reason);
             return false;
         }
         var f2 = SubscriptionStore.load(context);               // перечитать (гонка) — вдруг юзер успел добавить
         if (f2.seededDefaultRuBypass || f2.sources.Count > 0) { _seedStatus.value = new SeedStatus(attempted: true, error: ""); return false; }
         var id = newId();
-        // Пр.140: вместе с чёрным списком (ВКЛ) сеем источники белого списка (ВЫКЛ, whiteList=true) — тела
-        // подтянет авто-рефреш; в обычном режиме они не мешают (выключены), в белом — включатся эффективно.
-        var whiteSources = WHITE_LIST_SOURCES.Select(p =>
-            new SubSource { id = newId(), name = p.name, url = normalizeUrl(p.url), enabled = false, whiteList = true }).ToList();
-        // Yzewe (ВКЛ) сеем ВМЕСТЕ с дефолтом — тело подтянет ближайший рефреш enabled-источников (автозапуск).
-        var yzewe = new SubSource { id = newId(), name = YZEWE_SOURCE_NAME, url = normalizeUrl(YZEWE_SOURCE_URL), enabled = true };
-        // Второй BLACK-дефолт (trojan-пул на 443, ВКЛ) — другой независимый пул на случай деградации основного.
-        var blackSs = new SubSource { id = newId(), name = BLACK_SS_NAME, url = normalizeUrl(BLACK_SS_URL), enabled = true };
-        SubscriptionStore.save(context, f2 with
+        var seeded = false;
+        SubscriptionStore.update(context, current =>
         {
-            seededDefaultRuBypass = true,
-            seededYzewe = true,
-            seededBlackSs = true,
-            seedLastError = "",                                // успех — чистим прежнюю ошибку
-            sources = new List<SubSource> { new() { id = id, name = DEFAULT_SOURCE_NAME, url = url, enabled = true }, yzewe, blackSs }.Concat(whiteSources).ToList(),
+            if (current.seededDefaultRuBypass || current.sources.Count > 0) return current;
+            // Пр.140: вместе с чёрным списком (ВКЛ) сеем источники белого списка (ВЫКЛ, whiteList=true) — тела
+            // подтянет авто-рефреш; в обычном режиме они не мешают (выключены), в белом — включатся эффективно.
+            var whiteSources = WHITE_LIST_SOURCES.Select(p =>
+                new SubSource { id = newId(), name = p.name, url = normalizeUrl(p.url), enabled = false, whiteList = true }).ToList();
+            // Yzewe (ВКЛ) сеем ВМЕСТЕ с дефолтом — тело подтянет ближайший рефреш enabled-источников (автозапуск).
+            var yzewe = new SubSource { id = newId(), name = YZEWE_SOURCE_NAME, url = normalizeUrl(YZEWE_SOURCE_URL), enabled = true };
+            // Второй BLACK-дефолт (trojan-пул на 443, ВКЛ) — другой независимый пул на случай деградации основного.
+            var blackSs = new SubSource { id = newId(), name = BLACK_SS_NAME, url = normalizeUrl(BLACK_SS_URL), enabled = true };
+            seeded = true;
+            return current with
+            {
+                seededDefaultRuBypass = true,
+                seededYzewe = true,
+                seededBlackSs = true,
+                seedLastError = "",                            // успех — чистим прежнюю ошибку
+                sources = new List<SubSource> { new() { id = id, name = DEFAULT_SOURCE_NAME, url = url, enabled = true }, yzewe, blackSs }.Concat(whiteSources).ToList(),
+            };
         });
+        if (!seeded) { _seedStatus.value = new SeedStatus(attempted: true, error: ""); return false; }
         importInto(context, id, cascade.result!.body, "Дефолтная подписка (первый успешный фетч)");
         _seedStatus.value = new SeedStatus(attempted: true, error: "");
         return true;
@@ -213,8 +230,19 @@ public static partial class SubscriptionManager
             .Select(p => new SubSource { id = newId(), name = p.name, url = normalizeUrl(p.url), enabled = false, whiteList = true })
             .ToList();
         if (missing.Count == 0) return;
-        SubscriptionStore.save(context, file with { sources = file.sources.Concat(missing).ToList() });
-        Log.i(TAG, $"добавлены источники белого списка (ВЫКЛ): {missing.Count}");
+        var added = 0;
+        SubscriptionStore.update(context, current =>
+        {
+            if (current.sources.Count == 0) return current;
+            var currentUrls = current.sources.Select(it => it.url).ToHashSet();
+            var toAdd = WHITE_LIST_SOURCES
+                .Where(p => !currentUrls.Contains(normalizeUrl(p.url)))
+                .Select(p => new SubSource { id = newId(), name = p.name, url = normalizeUrl(p.url), enabled = false, whiteList = true })
+                .ToList();
+            added = toAdd.Count;
+            return added == 0 ? current : current with { sources = current.sources.Concat(toAdd).ToList() };
+        });
+        if (added > 0) Log.i(TAG, $"добавлены источники белого списка (ВЫКЛ): {added}");
     }
 
     /** Убрать ВЕЧНО-МЁРТВЫЙ (404) источник белого списка [DEAD_WHITE_LIST_URL] у существующих установок (просьба
@@ -224,8 +252,14 @@ public static partial class SubscriptionManager
         var file = SubscriptionStore.load(context);
         var kept = file.sources.Where(it => !(it.whiteList && it.url.EndsWith(DEAD_WHITE_LIST_URL, StringComparison.Ordinal))).ToList();
         if (kept.Count == file.sources.Count) return;
-        SubscriptionStore.save(context, file with { sources = kept });
-        Log.i(TAG, $"убран вечно-мёртвый источник белого списка: {file.sources.Count - kept.Count}");
+        var removed = 0;
+        SubscriptionStore.update(context, current =>
+        {
+            var currentKept = current.sources.Where(it => !(it.whiteList && it.url.EndsWith(DEAD_WHITE_LIST_URL, StringComparison.Ordinal))).ToList();
+            removed = current.sources.Count - currentKept.Count;
+            return removed == 0 ? current : current with { sources = currentKept };
+        });
+        if (removed > 0) Log.i(TAG, $"убран вечно-мёртвый источник белого списка: {removed}");
     }
 
     /** Yzewe: добавить дефолтную подписку (ВКЛ) РАЗОВО, если ещё не добавляли (флаг seededYzewe) и её URL ещё нет.
@@ -241,11 +275,17 @@ public static partial class SubscriptionManager
         // ensureYzewe — ТОЛЬКО back-add для СУЩЕСТВУЮЩИХ установок (как ensureWhiteListSources, тот же гейт).
         if (file.sources.Count == 0) return;
         var url = normalizeUrl(YZEWE_SOURCE_URL);
-        var already = file.sources.Any(it => it.url == url);
-        var sources = already ? file.sources
-                      : file.sources.Append(new SubSource { id = newId(), name = YZEWE_SOURCE_NAME, url = url, enabled = true }).ToList();
-        SubscriptionStore.save(context, file with { seededYzewe = true, sources = sources });
-        if (!already) Log.i(TAG, "добавлена дефолтная подписка Yzewe (ВКЛ)");
+        var added = false;
+        SubscriptionStore.update(context, current =>
+        {
+            if (current.seededYzewe || current.sources.Count == 0) return current;
+            var currentAlready = current.sources.Any(it => it.url == url);
+            var currentSources = currentAlready ? current.sources
+                : current.sources.Append(new SubSource { id = newId(), name = YZEWE_SOURCE_NAME, url = url, enabled = true }).ToList();
+            added = !currentAlready;
+            return current with { seededYzewe = true, sources = currentSources };
+        });
+        if (added) Log.i(TAG, "добавлена дефолтная подписка Yzewe (ВКЛ)");
     }
 
     /** Второй BLACK-дефолт (igareck BLACK_SS+All, trojan-пул на 443): добавить РАЗОВО существующим установкам (флаг
@@ -257,11 +297,17 @@ public static partial class SubscriptionManager
         if (file.seededBlackSs) return;
         if (file.sources.Count == 0) return;                     // свежая установка — засеет trySeedDefaultSource
         var url = normalizeUrl(BLACK_SS_URL);
-        var already = file.sources.Any(it => it.url == url);
-        var sources = already ? file.sources
-                      : file.sources.Append(new SubSource { id = newId(), name = BLACK_SS_NAME, url = url, enabled = true }).ToList();
-        SubscriptionStore.save(context, file with { seededBlackSs = true, sources = sources });
-        if (!already) Log.i(TAG, "добавлен второй BLACK-дефолт (trojan-пул на 443, ВКЛ)");
+        var added = false;
+        SubscriptionStore.update(context, current =>
+        {
+            if (current.seededBlackSs || current.sources.Count == 0) return current;
+            var currentAlready = current.sources.Any(it => it.url == url);
+            var currentSources = currentAlready ? current.sources
+                : current.sources.Append(new SubSource { id = newId(), name = BLACK_SS_NAME, url = url, enabled = true }).ToList();
+            added = !currentAlready;
+            return current with { seededBlackSs = true, sources = currentSources };
+        });
+        if (added) Log.i(TAG, "добавлен второй BLACK-дефолт (trojan-пул на 443, ВКЛ)");
     }
 
     /**
@@ -276,21 +322,23 @@ public static partial class SubscriptionManager
         var file = SubscriptionStore.load(context);
         if (file.blackDefaultHealed) return;
         var blackUrl = normalizeUrl(DEFAULT_SOURCE_URL);
-        var hasBlack = file.sources.Any(it => it.url == blackUrl);
-        // ТОЧНЫЙ отпечаток бага: авто-засеяно (seededYzewe && seededDefaultRuBypass), BLACK-дефолта нет, и
-        // ЕДИНСТВЕННАЯ «настоящая» (не-белая) подписка — это ровно Yzewe. Так не трогаем того, кто ДОБАВИЛ свои
-        // подписки и удалил дефолт НАМЕРЕННО (у него среди не-белых будет не только Yzewe) — уважаем его выбор.
-        var nonWhite = file.sources.Where(it => !it.whiteList).ToList();
-        var onlyYzewe = nonWhite.Count == 1 && nonWhite[0].url == normalizeUrl(YZEWE_SOURCE_URL);
-        var affected = file.seededYzewe && file.seededDefaultRuBypass && !hasBlack && onlyYzewe;
-        if (!affected)
+        var healed = false;
+        SubscriptionStore.update(context, current =>
         {
-            SubscriptionStore.save(context, file with { blackDefaultHealed = true });
-            return;
-        }
-        var black = new SubSource { id = newId(), name = DEFAULT_SOURCE_NAME, url = blackUrl, enabled = true };
-        SubscriptionStore.save(context, file with { blackDefaultHealed = true, sources = file.sources.Append(black).ToList() });
-        Log.i(TAG, "починка: back-add igareck-дефолта (BLACK mobile) — был пропущен из-за гонки посева Yzewe");
+            if (current.blackDefaultHealed) return current;
+            var hasBlack = current.sources.Any(it => it.url == blackUrl);
+            // ТОЧНЫЙ отпечаток бага: авто-засеяно (seededYzewe && seededDefaultRuBypass), BLACK-дефолта нет, и
+            // ЕДИНСТВЕННАЯ «настоящая» (не-белая) подписка — это ровно Yzewe. Так не трогаем того, кто ДОБАВИЛ свои
+            // подписки и удалил дефолт НАМЕРЕННО (у него среди не-белых будет не только Yzewe) — уважаем его выбор.
+            var nonWhite = current.sources.Where(it => !it.whiteList).ToList();
+            var onlyYzewe = nonWhite.Count == 1 && nonWhite[0].url == normalizeUrl(YZEWE_SOURCE_URL);
+            var affected = current.seededYzewe && current.seededDefaultRuBypass && !hasBlack && onlyYzewe;
+            healed = affected;
+            if (!affected) return current with { blackDefaultHealed = true };
+            var black = new SubSource { id = newId(), name = DEFAULT_SOURCE_NAME, url = blackUrl, enabled = true };
+            return current with { blackDefaultHealed = true, sources = current.sources.Append(black).ToList() };
+        });
+        if (healed) Log.i(TAG, "починка: back-add igareck-дефолта (BLACK mobile) — был пропущен из-за гонки посева Yzewe");
     }
 
     /** Пр.140: id источников белого списка. */
@@ -500,18 +548,23 @@ public static partial class SubscriptionManager
         var file = SubscriptionStore.load(context);
         if (file.sources.Any(it => it.url == u)) return null;
         var id = newId();
-        var src = new SubSource { id = id, url = u, name = name.TakeIfNotBlank() ?? nameFromUrl(u) };
-        SubscriptionStore.save(context, file with { sources = file.sources.Append(src).ToList() });
-        return id;
+        var added = false;
+        SubscriptionStore.update(context, current =>
+        {
+            if (current.sources.Any(it => it.url == u)) return current;
+            var src = new SubSource { id = id, url = u, name = name.TakeIfNotBlank() ?? nameFromUrl(u) };
+            added = true;
+            return current with { sources = current.sources.Append(src).ToList() };
+        });
+        return added ? id : null;
     }
 
     /** Локальный источник из вставленного текста/файла (без URL). Тот же разбор, что refresh, но оффлайн. */
     public static (string id, RefreshSummary summary) addLocalFromBody(Context context, string body, string? name = null)
     {
         var id = newId();
-        var file = SubscriptionStore.load(context);
         var src = new SubSource { id = id, url = "", name = name.TakeIfNotBlank() ?? $"Вставка {now()}" };
-        SubscriptionStore.save(context, file with { sources = file.sources.Append(src).ToList() });
+        SubscriptionStore.update(context, current => current with { sources = current.sources.Append(src).ToList() });
         var detail = $"Локальная вставка: {body.Length} симв, похоже на {sniff(body)}";
         return (id, importInto(context, id, body, detail));
     }
@@ -520,8 +573,10 @@ public static partial class SubscriptionManager
     public static void rename(Context context, string id, string name)
     {
         var n = name.KTrim().IfBlank("Без имени");
-        var file = SubscriptionStore.load(context);
-        SubscriptionStore.save(context, file with { sources = file.sources.Select(it => it.id == id ? it with { name = n } : it).ToList() });
+        SubscriptionStore.update(context, current => current with
+        {
+            sources = current.sources.Select(it => it.id == id ? it with { name = n } : it).ToList(),
+        });
     }
 
     /**
@@ -531,15 +586,17 @@ public static partial class SubscriptionManager
      */
     public static void remove(Context context, string id)
     {
-        var file = SubscriptionStore.load(context);
-        var raw = new Dictionary<string, string>(file.rawBodies);
-        raw.Remove(id);
-        var trimmed = file with
+        SubscriptionStore.update(context, file =>
         {
-            sources = file.sources.Where(it => it.id != id).ToList(),
-            rawBodies = raw,
-        };
-        SubscriptionStore.save(context, recount(rebuildRegistry(trimmed)));
+            var raw = new Dictionary<string, string>(file.rawBodies);
+            raw.Remove(id);
+            var trimmed = file with
+            {
+                sources = file.sources.Where(it => it.id != id).ToList(),
+                rawBodies = raw,
+            };
+            return recount(rebuildRegistry(trimmed));
+        });
     }
 
     /** Сколько серверов ИСЧЕЗНЕТ при удалении источника (принадлежат только ему). */
@@ -554,9 +611,11 @@ public static partial class SubscriptionManager
      */
     public static void setEnabled(Context context, string id, bool enabled)
     {
-        var file = SubscriptionStore.load(context);
-        var updated = file with { sources = file.sources.Select(it => it.id == id ? it with { enabled = enabled } : it).ToList() };
-        SubscriptionStore.save(context, recount(rebuildRegistry(updated)));
+        SubscriptionStore.update(context, file =>
+        {
+            var updated = file with { sources = file.sources.Select(it => it.id == id ? it with { enabled = enabled } : it).ToList() };
+            return recount(rebuildRegistry(updated));
+        });
     }
 
     // ─────────────────────────── обновление ───────────────────────────
@@ -835,12 +894,15 @@ public static partial class SubscriptionManager
     /** Сохранить сырое тело источника [id] и ПЕРЕСОБРАТЬ реестр (Промпт 85). Статус источника — успех. */
     private static void storeRawAndRebuild(Context context, string id, string body, string? detail)
     {
-        var file = SubscriptionStore.load(context);
-        var raw = new Dictionary<string, string>(file.rawBodies) { [id] = body };
-        var withRaw = file with { rawBodies = raw };
-        var rebuilt = rebuildRegistry(withRaw);
-        var sources = rebuilt.sources.Select(it => it.id == id ? applyStatus(it, true, SourceOutcome.OK, null, detail, null) : it).ToList();
-        SubscriptionStore.save(context, recount(rebuilt with { sources = sources }));
+        beforeRefreshCommitForTest?.Invoke();
+        SubscriptionStore.update(context, file =>
+        {
+            var raw = new Dictionary<string, string>(file.rawBodies) { [id] = body };
+            var withRaw = file with { rawBodies = raw };
+            var rebuilt = rebuildRegistry(withRaw);
+            var sources = rebuilt.sources.Select(it => it.id == id ? applyStatus(it, true, SourceOutcome.OK, null, detail, null) : it).ToList();
+            return recount(rebuilt with { sources = sources });
+        });
     }
 
     /**
@@ -862,7 +924,7 @@ public static partial class SubscriptionManager
             if (!byKey.TryGetValue(k, out var ex))
             {
                 var prof = meas.TryGetValue(k, out var m)
-                    ? p with { pingMs = m.pingMs, lastTestedTs = m.lastTestedTs, speedMbps = m.speedMbps, speedTestedTs = m.speedTestedTs }
+                    ? p with { pingMs = m.pingMs, lastTestedTs = m.lastTestedTs, speedMbps = m.speedMbps, speedTestedTs = m.speedTestedTs, speedFull = m.speedFull }
                     : p;
                 byKey[k] = new ServerRecord { profile = prof, sourceIds = [sid] };
                 order.Add(k);
@@ -923,11 +985,18 @@ public static partial class SubscriptionManager
     public static void verifyAndHeal(Context context)
     {
         var file = SubscriptionStore.load(context);
-        var bad = file.servers.Count(it => !isProfileComplete(it.profile));
+        if (file.servers.All(it => isProfileComplete(it.profile))) return;
+        var bad = 0;
+        var after = 0;
+        SubscriptionStore.update(context, current =>
+        {
+            bad = current.servers.Count(it => !isProfileComplete(it.profile));
+            if (bad == 0) return current;
+            var rebuilt = recount(rebuildRegistry(current));
+            after = rebuilt.servers.Count(it => !isProfileComplete(it.profile));
+            return rebuilt;
+        });
         if (bad == 0) return;
-        var rebuilt = recount(rebuildRegistry(file));
-        var after = rebuilt.servers.Count(it => !isProfileComplete(it.profile));
-        SubscriptionStore.save(context, rebuilt);
         runCatching(() => MonitorLog.@event(
             context, "monitor", "Реестр: неполные профили — пересборка",
             $"было {bad}, после пересборки {after}" + (after > 0 ? " (нужно обновить источники)" : "")));
@@ -988,7 +1057,7 @@ public static partial class SubscriptionManager
      * существующей записи, добавив sourceId), отсутствующие в импорте — убрать sourceId (и запись,
      * если источников не осталось), новые — добавить. Возвращает (новый реестр, число склеек).
      */
-    private static (IReadOnlyList<ServerRecord> registry, int merged) mergeIntoRegistry(
+    internal static (IReadOnlyList<ServerRecord> registry, int merged) mergeIntoRegistry(
         IReadOnlyList<ServerRecord> registry, string sourceId, IReadOnlyList<ServerProfile> profiles)
     {
         var incoming = new Dictionary<string, ServerProfile>();
@@ -1011,7 +1080,7 @@ public static partial class SubscriptionManager
                 var mergedProfile = fresh with
                 {
                     pingMs = rec.profile.pingMs, lastTestedTs = rec.profile.lastTestedTs,
-                    speedMbps = rec.profile.speedMbps, speedTestedTs = rec.profile.speedTestedTs,
+                    speedMbps = rec.profile.speedMbps, speedTestedTs = rec.profile.speedTestedTs, speedFull = rec.profile.speedFull,
                 };
                 result.Add(new ServerRecord { profile = mergedProfile, sourceIds = rec.sourceIds.Append(sourceId).Distinct().ToList() });
                 if (!rec.sourceIds.Contains(sourceId)) merged++;
@@ -1044,8 +1113,8 @@ public static partial class SubscriptionManager
         SourceOutcome? outcome = null, int? retryAfter = null)
     {
         var oc = outcome ?? (ok ? SourceOutcome.OK : SourceOutcome.ERROR);
-        var file = SubscriptionStore.load(context);
-        SubscriptionStore.save(context, file with
+        beforeRefreshCommitForTest?.Invoke();
+        SubscriptionStore.update(context, file => file with
         {
             sources = file.sources.Select(it => it.id == id ? applyStatus(it, ok, oc, error, detail, retryAfter) : it).ToList(),
         });
