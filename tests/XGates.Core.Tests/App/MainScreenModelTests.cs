@@ -147,7 +147,10 @@ public sealed class MainScreenModelTests : IDisposable
         XrayProxyService.start(ctx, XrayConfigBuilder.build(p), ServerLabels.full(p), "missing-from-registry");
         Assert.True(WaitUntil(() => ProxyState.state.value.running, 10_000), ProxyState.state.value.message);
         TunnelHealth.ok("198.51.100.1", JavaSystem.currentTimeMillis(), "missing-from-registry");   // без FirstAliveRace
-        NetworkMonitor.ACTIVE_PROBE_CAP_MS = 100;
+        // Здесь проверяются поколения операций, а не throughput: приоритетный замер не должен ждать медленный стенд.
+        var immediateProbe = $"http://127.0.0.1:{net.HttpPort}/generate_204";
+        ServerSpeedTester.probesOverrideForTest = [immediateProbe];
+        SettingsStore.update(ctx, SettingsStore.current() with { directProbeUrl = immediateProbe });
 
         var (savedQuick, savedExact) = (FullTestRunner.measureQuick, FullTestRunner.measureExact);
         var calls = 0;
@@ -182,7 +185,6 @@ public sealed class MainScreenModelTests : IDisposable
         finally
         {
             firstRelease.Set(); secondRelease.Set();
-            NetworkMonitor.ACTIVE_PROBE_CAP_MS = 45_000L;
             (FullTestRunner.measureQuick, FullTestRunner.measureExact) = (savedQuick, savedExact);
         }
     }
@@ -194,7 +196,10 @@ public sealed class MainScreenModelTests : IDisposable
         XrayProxyService.start(ctx, XrayConfigBuilder.build(p), ServerLabels.full(p), "missing-from-registry");
         Assert.True(WaitUntil(() => ProxyState.state.value.running, 10_000), ProxyState.state.value.message);
         TunnelHealth.ok("198.51.100.1", JavaSystem.currentTimeMillis(), "missing-from-registry");   // без FirstAliveRace
-        NetworkMonitor.ACTIVE_PROBE_CAP_MS = 100;
+        // Здесь проверяются поколения операций, а не throughput: приоритетный замер не должен ждать медленный стенд.
+        var immediateProbe = $"http://127.0.0.1:{net.HttpPort}/generate_204";
+        ServerSpeedTester.probesOverrideForTest = [immediateProbe];
+        SettingsStore.update(ctx, SettingsStore.current() with { directProbeUrl = immediateProbe });
 
         var (savedQuick, savedExact) = (FullTestRunner.measureQuick, FullTestRunner.measureExact);
         using var checkEntered = new ManualResetEventSlim();
@@ -224,7 +229,6 @@ public sealed class MainScreenModelTests : IDisposable
         {
             checkRelease.Set(); fullRelease.Set();
             NetworkMonitor.directAliveOverrideForTest = () => true;
-            NetworkMonitor.ACTIVE_PROBE_CAP_MS = 45_000L;
             (FullTestRunner.measureQuick, FullTestRunner.measureExact) = (savedQuick, savedExact);
         }
     }

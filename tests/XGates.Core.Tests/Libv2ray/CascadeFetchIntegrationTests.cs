@@ -199,15 +199,16 @@ public sealed class CascadeFetchIntegrationTests : IDisposable
     {
         var dest = Path.Combine(ctx.filesDir, "slow.msi");
         var started = Environment.TickCount64;
-        // Страховка для старого кода: через 2,5 с он завершится как «отменено», а не зависнет в тесте навсегда.
-        var r = CascadeFetch.download(ctx, U("/drip"), "ua", dest, 1000, 1000, 300,
-            isCancelled: () => Environment.TickCount64 - started > 2500);
+        // Бюджет больше предварительной проверки SOCKS (до 300 мс): DIRECT должен начаться и упереться в общий deadline.
+        // Страховка для старого кода: через 3,5 с он завершится как «отменено», а не зависнет в тесте навсегда.
+        var r = CascadeFetch.download(ctx, U("/drip"), "ua", dest, 1000, 1000, 1200,
+            isCancelled: () => Environment.TickCount64 - started > 3500);
         var elapsed = Environment.TickCount64 - started;
 
         Assert.False(r.ok);
         Assert.False(r.cancelled, "загрузку остановила внешняя страховка, а не общий deadline");
         Assert.Contains("общий таймаут", r.attempts.Single(a => !a.skipped).note, StringComparison.OrdinalIgnoreCase);
-        Assert.True(elapsed < 1500, $"абсолютный deadline не сработал: {elapsed} мс");
+        Assert.True(elapsed < 2500, $"абсолютный deadline не сработал: {elapsed} мс");
         Assert.False(File.Exists(dest));
     }
 
